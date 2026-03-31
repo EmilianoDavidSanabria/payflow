@@ -5,6 +5,5 @@ builder = "DOCKERFILE"
 startCommand = "cd payflow && gunicorn payflow.wsgi:application --bind 0.0.0.0:$PORT"
 healthcheckPath = "/core/health/"
 healthcheckTimeout = 300
-preDeployCommand = "cd payflow && python manage.py migrate"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
