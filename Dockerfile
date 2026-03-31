@@ -18,3 +18,5 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY . /app/
 
 WORKDIR /app/payflow
+
+CMD ["gunicorn", "payflow.wsgi:application", "--bind", "0.0.0.0:8080"]
