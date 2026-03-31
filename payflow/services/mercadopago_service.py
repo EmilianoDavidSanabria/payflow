@@ -13,6 +13,11 @@ class MercadoPagoService:
         self.sdk = mercadopago.SDK(access_token)
 
     def create_top_up_preference(self, wallet_transaction):
+        if wallet_transaction.wallet.currency != "ARS":
+            raise ValueError(
+                "Mercado Pago top-ups are currently supported only in ARS wallets"
+            )
+
         preference_data = {
             "items": [
                 {
@@ -56,9 +61,15 @@ class MercadoPagoService:
                 f"Mercado Pago preference error | status={status_code} | response={response}"
             )
 
-        checkout_url = response.get("init_point") or response.get("sandbox_init_point")
+        checkout_url = response.get("init_point")
 
         if not checkout_url:
+            sandbox_url = response.get("sandbox_init_point")
+            if sandbox_url:
+                raise ValueError(
+                    "Mercado Pago returned a sandbox checkout URL. Real top-ups require a production init_point."
+                )
+
             raise ValueError(
                 f"Mercado Pago preference missing checkout URL | status={status_code} | response={response}"
             )

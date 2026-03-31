@@ -1,66 +1,59 @@
-import { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import { useAuth } from "../context/AuthContext";
 
-function LoginPage() {
+function RegisterPage() {
   const navigate = useNavigate();
-  const location = useLocation();
-  const { login } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (location.state?.registrationSuccess) {
-      setSuccessMessage(location.state.registrationSuccess);
-    }
-
-    if (location.state?.registeredEmail) {
-      setEmail(location.state.registeredEmail);
-    }
-  }, [location.state]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMessage("");
-    setSuccessMessage("");
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    if (!normalizedEmail || !password) {
-      setErrorMessage("Enter your email and password.");
+    if (!normalizedEmail || !password || !confirmPassword) {
+      setErrorMessage("Enter your email, password, and password confirmation.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setErrorMessage("Passwords do not match.");
       return;
     }
 
     try {
       setSubmitting(true);
 
-      const response = await api.post("/api/token/", {
+      await api.post("/users/register/", {
         email: normalizedEmail,
         password,
       });
 
-      const { access, refresh } = response.data;
-
-      login(access, refresh);
-      navigate("/dashboard");
+      navigate("/", {
+        replace: true,
+        state: {
+          registrationSuccess: "Account created successfully. Sign in to continue.",
+          registeredEmail: normalizedEmail,
+        },
+      });
     } catch (error) {
-      console.error("LOGIN ERROR:", error);
-
+      console.error("REGISTER ERROR:", error);
       const data = error.response?.data;
 
-      if (data?.detail) {
-        setErrorMessage(data.detail);
-      } else if (data?.email?.length) {
+      if (data?.email?.length) {
         setErrorMessage(data.email[0]);
-      } else if (data?.username?.length) {
-        setErrorMessage(data.username[0]);
+      } else if (data?.password?.length) {
+        setErrorMessage(data.password[0]);
+      } else if (data?.detail) {
+        setErrorMessage(data.detail);
       } else {
-        setErrorMessage("Could not sign in right now. Please try again.");
+        setErrorMessage("Could not create your account.");
       }
     } finally {
       setSubmitting(false);
@@ -71,9 +64,9 @@ function LoginPage() {
     <div className="login-shell">
       <div className="card login-card">
         <p className="eyebrow">PAYFLOW</p>
-        <h1 className="login-title">Sign in</h1>
+        <h1 className="login-title">Create account</h1>
         <p className="login-subtitle">
-          Access your wallet, payments, transaction history, audit logs, and metrics.
+          Register with your email and password, then sign in to use PayFlow.
         </p>
 
         <form onSubmit={handleSubmit}>
@@ -96,28 +89,36 @@ function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
-              autoComplete="current-password"
+              placeholder="Create your password"
+              autoComplete="new-password"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="label">Confirm password</label>
+            <input
+              className="input"
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Repeat your password"
+              autoComplete="new-password"
             />
           </div>
 
           <button className="btn btn-primary" type="submit" disabled={submitting}>
-            {submitting ? "Signing in..." : "Sign in"}
+            {submitting ? "Creating account..." : "Create account"}
           </button>
         </form>
-
-        {successMessage && (
-          <div className="message message-success">{successMessage}</div>
-        )}
 
         {errorMessage && (
           <div className="message message-error">{errorMessage}</div>
         )}
 
         <p style={{ marginTop: "16px", marginBottom: 0 }}>
-          Don&apos;t have an account?{" "}
-          <Link to="/register" className="link-inline">
-            Create one
+          Already have an account?{" "}
+          <Link to="/" className="link-inline">
+            Sign in
           </Link>
         </p>
       </div>
@@ -125,4 +126,4 @@ function LoginPage() {
   );
 }
 
-export default LoginPage;
+export default RegisterPage;

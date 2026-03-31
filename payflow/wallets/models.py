@@ -18,8 +18,8 @@ class Wallet(models.Model):
     )
 
     currency = models.CharField(
-        max_length=10,
-        default="USD"
+        max_length=15,
+        default="ARS"
     )
 
     created_at = models.DateTimeField(auto_now_add=True)

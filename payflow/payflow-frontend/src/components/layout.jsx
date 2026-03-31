@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 function Layout({ title, subtitle, children }) {
-  const { logout, isAuthenticated } = useAuth();
+  const { logout, isAuthenticated, currentUser } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -46,6 +46,10 @@ function Layout({ title, subtitle, children }) {
               <NavLink to="/metrics" className={getNavLinkClass}>
                 Metrics
               </NavLink>
+
+              {currentUser?.email && (
+                <span style={{ opacity: 0.85 }}>{currentUser.email}</span>
+              )}
 
               <button type="button" className="btn btn-primary" onClick={handleLogout}>
                 Logout

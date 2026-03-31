@@ -36,10 +36,16 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    const requestUrl = originalRequest.url || "";
+
+    const isLoginRequest = requestUrl.includes("/api/token/");
+    const isRefreshRequest = requestUrl.includes("/api/token/refresh/");
+
     if (
       error.response?.status === 401 &&
       !originalRequest._retry &&
-      !originalRequest.url?.includes("/api/token/refresh/")
+      !isLoginRequest &&
+      !isRefreshRequest
     ) {
       originalRequest._retry = true;
 

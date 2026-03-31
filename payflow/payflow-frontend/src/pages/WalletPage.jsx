@@ -312,7 +312,9 @@ function WalletPage() {
 
               <form onSubmit={handleTopUpSubmit}>
                 <div className="form-group">
-                  <label className="label">Amount</label>
+                  <label className="label">
+                    Amount ({wallet?.currency || "ARS"})
+                  </label>
                   <input
                     className="input"
                     type="number"
@@ -320,9 +322,13 @@ function WalletPage() {
                     min="0"
                     value={topUpAmount}
                     onChange={(e) => setTopUpAmount(e.target.value)}
-                    placeholder="100.00"
+                    placeholder={wallet?.currency === "ARS" ? "1000.00" : "10.00"}
                   />
                 </div>
+
+                <p style={{ marginTop: "8px", marginBottom: "16px", opacity: 0.8 }}>
+                  Top-ups through Mercado Pago are processed in {wallet?.currency}.
+                </p>
 
                 <button
                   type="submit"
@@ -356,7 +362,9 @@ function WalletPage() {
 
               <form onSubmit={handleWithdrawSubmit}>
                 <div className="form-group">
-                  <label className="label">Amount</label>
+                  <label className="label">
+                    Amount ({wallet?.currency || "ARS"})
+                  </label>
                   <input
                     className="input"
                     type="number"
@@ -364,9 +372,13 @@ function WalletPage() {
                     min="0"
                     value={withdrawAmount}
                     onChange={(e) => setWithdrawAmount(e.target.value)}
-                    placeholder="50.00"
+                    placeholder={wallet?.currency === "ARS" ? "1000.00" : "10.00"}
                   />
                 </div>
+
+                <p style={{ marginTop: "8px", marginBottom: "16px", opacity: 0.8 }}>
+                  Withdrawals are processed in {wallet?.currency}.
+                </p>
 
                 <button
                   type="submit"
