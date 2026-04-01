@@ -14,14 +14,19 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+from django.http import JsonResponse
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from users.auth_views import EmailTokenObtainPairView
 
+def test_ping(request):
+    return JsonResponse({"ok": True, "service": "payflow-backend"})
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("test-ping/", test_ping),
 
     path("api/token/", EmailTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
