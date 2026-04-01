@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import Layout from "../components/Layout";
+import Layout from "../components/Layout.jsx";
 import {
   formatCurrency,
   formatDate,
   formatRelativeAmount,
 } from "../utils/formatters";
+
 
 function DashboardPage() {
   const [wallet, setWallet] = useState(null);
