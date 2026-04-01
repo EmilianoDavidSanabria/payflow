@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import Layout from "../components/Layout.jsx";
+import AppLayout from "../components/AppLayout.jsx";
 import ConfirmPaymentModal from "../components/ConfirmPaymentModal";
 import { formatCurrency, formatDate } from "../utils/formatters";
 import UserSearchInput from "../components/UserSearchInput";

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-import Layout from "../components/Layout.jsx";
+import AppLayout from "../components/AppLayout.jsx";
 
 function MetricsPage() {
   const [metrics, setMetrics] = useState(null);

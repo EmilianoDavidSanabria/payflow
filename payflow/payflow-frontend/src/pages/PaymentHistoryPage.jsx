@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
-import Layout from "../components/Layout.jsx";
+import AppLayout from "../components/AppLayout.jsx";
 import { formatCurrency, formatDate } from "../utils/formatters";
 import { Link } from "react-router-dom";
 
