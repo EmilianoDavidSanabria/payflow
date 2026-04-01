@@ -140,6 +140,7 @@ STORAGES = {
 }
 
 # Security settings para producción
+
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", default=False)
 SESSION_COOKIE_SECURE = not DEBUG
