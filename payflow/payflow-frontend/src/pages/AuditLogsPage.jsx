@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-import Layout from "../components/Layout";
+import Layout from "../components/Layout.jsx";
 import { formatDate } from "../utils/formatters";
 
 function AuditLogsPage() {

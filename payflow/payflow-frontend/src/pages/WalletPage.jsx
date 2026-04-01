@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import Layout from "../components/Layout";
+import Layout from "../components/Layout.jsx";
 import { formatCurrency, formatDate } from "../utils/formatters";
 
 function WalletPage() {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
-import Layout from "../components/Layout";
+import Layout from "../components/Layout.jsx";
 import {
   formatCurrency,
   formatDate,
