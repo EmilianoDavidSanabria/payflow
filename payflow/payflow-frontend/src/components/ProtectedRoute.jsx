@@ -1,5 +1,4 @@
 import { Navigate } from "react-router-dom";
-import ProtectedRoute from "../components/ProtectedRoute.jsx";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, authResolved } = useAuth();

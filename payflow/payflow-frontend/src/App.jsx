@@ -1,15 +1,15 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import LoginPage from "./pages/LoginPage";
-import RegisterPage from "./pages/RegisterPage";
-import DashboardPage from "./pages/DashboardPage";
-import WalletPage from "./pages/WalletPage";
-import PaymentsPage from "./pages/PaymentsPage";
-import PaymentHistoryPage from "./pages/PaymentHistoryPage";
-import PaymentDetailPage from "./pages/PaymentDetailPage";
-import PaymentRequestDetailPage from "./pages/PaymentRequestDetailPage";
-import MetricsPage from "./pages/MetricsPage";
-import AuditLogsPage from "./pages/AuditLogsPage";
-import ProtectedRoute from "./components/ProtectedRoute";
+import LoginPage from "./pages/LoginPage.jsx";
+import RegisterPage from "./pages/RegisterPage.jsx";
+import DashboardPage from "./pages/DashboardPage.jsx";
+import WalletPage from "./pages/WalletPage.jsx";
+import PaymentsPage from "./pages/PaymentsPage.jsx";
+import PaymentHistoryPage from "./pages/PaymentHistoryPage.jsx";
+import PaymentDetailPage from "./pages/PaymentDetailPage.jsx";
+import PaymentRequestDetailPage from "./pages/PaymentRequestDetailPage.jsx";
+import MetricsPage from "./pages/MetricsPage.jsx";
+import AuditLogsPage from "./pages/AuditLogsPage.jsx";
+import ProtectedRoute from "./components/ProtectedRoute.jsx";
 
 function App() {
   return (
