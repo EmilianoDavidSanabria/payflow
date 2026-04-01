@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
+import UserSearchInput from "../components/UserSearchInput.jsx";
 
 function UserSearchInput({ value, onSelect }) {
   const [query, setQuery] = useState(value || "");
