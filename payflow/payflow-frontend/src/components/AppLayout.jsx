@@ -1,7 +1,8 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
-function Layout({ title, subtitle, children }) {
+// Cambiado de Layout a AppLayout
+function AppLayout({ title, subtitle, children }) {
   const { logout, isAuthenticated, currentUser } = useAuth();
   const navigate = useNavigate();
 
@@ -71,4 +72,5 @@ function Layout({ title, subtitle, children }) {
   );
 }
 
-export default Layout;
+// Cambiado de export default Layout a AppLayout
+export default AppLayout;

@@ -8,7 +8,6 @@ import {
   formatRelativeAmount,
 } from "../utils/formatters";
 
-
 function DashboardPage() {
   const [wallet, setWallet] = useState(null);
   const [recentSummary, setRecentSummary] = useState(null);
@@ -64,7 +63,7 @@ function DashboardPage() {
   }, [recentPayments]);
 
   return (
-    <Layout
+    <AppLayout
       title="Dashboard"
       subtitle="Review your balance, recent payment activity, and the main flows available in PayFlow."
     >
@@ -341,7 +340,7 @@ function DashboardPage() {
           </div>
         </>
       )}
-    </Layout>
+    </AppLayout>
   );
 }
 
