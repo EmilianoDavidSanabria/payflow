@@ -17,6 +17,4 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY . /app/
 
-RUN chmod +x /app/start.sh
-
-CMD ["/app/start.sh"]
+CMD ["sh", "-c", "gunicorn payflow.wsgi:application --bind 0.0.0.0:$PORT"]
