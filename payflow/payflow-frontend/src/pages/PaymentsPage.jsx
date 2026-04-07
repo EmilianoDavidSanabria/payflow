@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../api/client";
+import { api, getApiErrorMessage } from "../api/client";
 import AppLayout from "../components/AppLayout.jsx";
 import ConfirmPaymentModal from "../components/ConfirmPaymentModal";
 import { formatCurrency, formatDate } from "../utils/formatters";
@@ -46,6 +46,16 @@ function PaymentsPage() {
     date_from: "",
     date_to: "",
   });
+
+  const clearPaymentMessages = () => {
+    setSuccessMessage("");
+    setErrorMessage("");
+  };
+
+  const clearRequestMessages = () => {
+    setRequestSuccessMessage("");
+    setRequestErrorMessage("");
+  };
 
   useEffect(() => {
     const fetchRecentRecipients = async () => {
@@ -117,7 +127,9 @@ function PaymentsPage() {
         setRequestHistoryTotalPages(response.data.total_pages);
       } catch (error) {
         console.error("PAYMENT REQUEST HISTORY ERROR:", error);
-        setRequestHistoryError("Could not load payment request history.");
+        setRequestHistoryError(
+          getApiErrorMessage(error, "Could not load payment request history.")
+        );
       } finally {
         setLoadingRequestHistory(false);
       }
@@ -134,22 +146,6 @@ function PaymentsPage() {
     }),
     [incomingRequests.length, outgoingRequests.length, requestHistoryCount]
   );
-
-  const getErrorMessage = (error, fallback) => {
-    if (error.response?.data?.detail) return error.response.data.detail;
-    if (error.response?.data?.error) return error.response.data.error;
-    return fallback;
-  };
-
-  const clearPaymentMessages = () => {
-    setSuccessMessage("");
-    setErrorMessage("");
-  };
-
-  const clearRequestMessages = () => {
-    setRequestSuccessMessage("");
-    setRequestErrorMessage("");
-  };
 
   const refreshPaymentRequests = async () => {
     try {
@@ -179,13 +175,19 @@ function PaymentsPage() {
     }
   };
 
+  const getRequestStatusBadgeClass = (status) => {
+    if (status === "ACCEPTED") return "badge-success";
+    if (status === "REJECTED") return "badge-error";
+    return "badge-info";
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
 
     clearPaymentMessages();
 
     if (!receiverUsername || !amount) {
-      setErrorMessage("Receiver and amount required.");
+      setErrorMessage("Select a receiver and enter an amount.");
       return;
     }
 
@@ -216,7 +218,7 @@ function PaymentsPage() {
       );
 
       setPaymentData(response.data);
-      setSuccessMessage("Payment created successfully.");
+      setSuccessMessage("Payment completed successfully.");
 
       const paidUsername = response.data.receiver_username;
 
@@ -273,7 +275,7 @@ function PaymentsPage() {
       await refreshPaymentRequests();
     } catch (error) {
       console.error("PAYMENT ERROR:", error);
-      setErrorMessage(getErrorMessage(error, "Could not create payment."));
+      setErrorMessage(getApiErrorMessage(error, "Could not create payment."));
     } finally {
       setSubmittingPayment(false);
     }
@@ -285,7 +287,7 @@ function PaymentsPage() {
     clearRequestMessages();
 
     if (!requestUsername || !requestAmount) {
-      setRequestErrorMessage("Username and amount required.");
+      setRequestErrorMessage("Select a username and enter an amount.");
       return;
     }
 
@@ -309,7 +311,7 @@ function PaymentsPage() {
     } catch (error) {
       console.error("PAYMENT REQUEST CREATE ERROR:", error);
       setRequestErrorMessage(
-        getErrorMessage(error, "Could not create payment request.")
+        getApiErrorMessage(error, "Could not create payment request.")
       );
     } finally {
       setSubmittingRequest(false);
@@ -326,7 +328,9 @@ function PaymentsPage() {
       await refreshPaymentRequests();
     } catch (error) {
       console.error("PAYMENT REQUEST ACCEPT ERROR:", error);
-      setErrorMessage(getErrorMessage(error, "Could not accept payment request."));
+      setErrorMessage(
+        getApiErrorMessage(error, "Could not accept payment request.")
+      );
     } finally {
       setRequestActionLoadingId(null);
     }
@@ -342,7 +346,9 @@ function PaymentsPage() {
       await refreshPaymentRequests();
     } catch (error) {
       console.error("PAYMENT REQUEST REJECT ERROR:", error);
-      setRequestErrorMessage(getErrorMessage(error, "Could not reject payment request."));
+      setRequestErrorMessage(
+        getApiErrorMessage(error, "Could not reject payment request.")
+      );
     } finally {
       setRequestActionLoadingId(null);
     }
@@ -357,7 +363,7 @@ function PaymentsPage() {
   };
 
   return (
-    <Layout
+    <AppLayout
       title="Payments"
       subtitle="Send money, request payments from other users, and manage pending payment requests."
     >
@@ -485,6 +491,10 @@ function PaymentsPage() {
               />
             </div>
 
+            <p style={{ marginTop: "8px", marginBottom: "16px", opacity: 0.8 }}>
+              Payments are created immediately and require confirmation before they are sent.
+            </p>
+
             <button
               className="btn btn-primary"
               type="submit"
@@ -526,6 +536,10 @@ function PaymentsPage() {
                 placeholder="50.00"
               />
             </div>
+
+            <p style={{ marginTop: "8px", marginBottom: "16px", opacity: 0.8 }}>
+              The request stays pending until the other user accepts or rejects it.
+            </p>
 
             <button
               className="btn btn-primary"
@@ -670,7 +684,9 @@ function PaymentsPage() {
                       </td>
                       <td>{formatCurrency(request.amount)}</td>
                       <td>
-                        <span className="badge badge-info">{request.status}</span>
+                        <span className={`badge ${getRequestStatusBadgeClass(request.status)}`}>
+                          {request.status}
+                        </span>
                       </td>
                       <td>{formatDate(request.created_at)}</td>
                       <td>
@@ -832,13 +848,7 @@ function PaymentsPage() {
                         <td>{formatCurrency(request.amount)}</td>
                         <td>
                           <span
-                            className={`badge ${
-                              request.status === "ACCEPTED"
-                                ? "badge-success"
-                                : request.status === "REJECTED"
-                                ? "badge-error"
-                                : "badge-info"
-                            }`}
+                            className={`badge ${getRequestStatusBadgeClass(request.status)}`}
                           >
                             {request.status}
                           </span>
@@ -948,7 +958,7 @@ function PaymentsPage() {
           onCancel={() => setShowConfirm(false)}
         />
       )}
-    </Layout>
+    </AppLayout>
   );
 }
 

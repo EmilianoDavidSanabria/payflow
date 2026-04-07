@@ -82,7 +82,7 @@ function PaymentRequestDetailPage() {
   };
 
   return (
-    <Layout title="Payment Request Details" subtitle={`Request ID: ${id}`}>
+    <AppLayout title="Payment Request Details" subtitle={`Request ID: ${id}`}>
       {error && <div className="message message-error">{error}</div>}
 
       {loading && !error && <p>Loading payment request...</p>}
@@ -251,7 +251,7 @@ function PaymentRequestDetailPage() {
           </div>
         </>
       )}
-    </Layout>
+    </AppLayout>
   );
 }
 

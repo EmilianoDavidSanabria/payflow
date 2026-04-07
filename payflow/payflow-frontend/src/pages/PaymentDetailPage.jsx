@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api } from "../api/client";
+import { api, getApiErrorMessage } from "../api/client";
 import {
   formatCurrency,
   formatDate,
   formatRelativeAmount,
 } from "../utils/formatters";
-
 import AppLayout from "../components/AppLayout.jsx";
+
 function PaymentDetailPage() {
   const { id } = useParams();
 
@@ -31,7 +31,12 @@ function PaymentDetailPage() {
         setWallet(walletResponse.data);
       } catch (error) {
         console.error("PAYMENT DETAIL ERROR:", error);
-        setError("Could not load payment.");
+
+        if (error.response?.status === 404) {
+          setError("Payment not found.");
+        } else {
+          setError(getApiErrorMessage(error, "Could not load payment."));
+        }
       } finally {
         setLoading(false);
       }
@@ -40,6 +45,11 @@ function PaymentDetailPage() {
     fetchPaymentData();
   }, [id]);
 
+  const isSender = useMemo(() => {
+    if (!payment || !wallet) return false;
+    return wallet.user === payment.sender;
+  }, [payment, wallet]);
+
   const getStatusBadgeClass = (status) => {
     if (status === "COMPLETED") return "badge-success";
     if (status === "PENDING") return "badge-info";
@@ -47,11 +57,35 @@ function PaymentDetailPage() {
     return "badge-info";
   };
 
+  const getStatusLabel = (status) => {
+    if (status === "COMPLETED") return "Completed";
+    if (status === "PENDING") return "Pending";
+    if (status === "FAILED") return "Failed";
+    return status || "-";
+  };
+
+  const getPaymentNarrative = () => {
+    if (!payment || !wallet) return "";
+
+    if (payment.status === "COMPLETED") {
+      return isSender
+        ? "This payment was completed successfully and the funds were sent from your wallet."
+        : "This payment was completed successfully and the funds were received in your wallet.";
+    }
+
+    if (payment.status === "PENDING") {
+      return "This payment is still pending and has not reached a final state yet.";
+    }
+
+    if (payment.status === "FAILED") {
+      return "This payment failed and did not complete successfully.";
+    }
+
+    return "Review the payment details below.";
+  };
+
   return (
-    <Layout
-      title="Payment Details"
-      subtitle={`Payment ID: ${id}`}
-    >
+    <AppLayout title="Payment details" subtitle={`Payment ID: ${id}`}>
       {error && <div className="message message-error">{error}</div>}
 
       {loading && !error && <p>Loading payment...</p>}
@@ -70,9 +104,7 @@ function PaymentDetailPage() {
             >
               <div>
                 <p style={{ margin: 0, fontSize: "0.95rem", opacity: 0.8 }}>
-                  {wallet.user === payment.sender
-                    ? "You sent this payment."
-                    : "You received this payment."}
+                  {isSender ? "You sent this payment." : "You received this payment."}
                 </p>
 
                 <h2
@@ -82,11 +114,7 @@ function PaymentDetailPage() {
                     fontSize: "2rem",
                   }}
                 >
-                  {formatRelativeAmount(
-                    payment.amount,
-                    wallet.user === payment.sender,
-                    wallet.currency
-                  )}
+                  {formatRelativeAmount(payment.amount, isSender, wallet.currency)}
                 </h2>
 
                 <div
@@ -96,18 +124,18 @@ function PaymentDetailPage() {
                     flexWrap: "wrap",
                   }}
                 >
-                  <span
-                    className={`badge ${
-                      wallet.user === payment.sender ? "badge-info" : "badge-success"
-                    }`}
-                  >
-                    {wallet.user === payment.sender ? "Sent" : "Received"}
+                  <span className={`badge ${isSender ? "badge-info" : "badge-success"}`}>
+                    {isSender ? "Sent" : "Received"}
                   </span>
 
                   <span className={`badge ${getStatusBadgeClass(payment.status)}`}>
-                    {payment.status}
+                    {getStatusLabel(payment.status)}
                   </span>
                 </div>
+
+                <p style={{ marginTop: "12px", marginBottom: 0, opacity: 0.82 }}>
+                  {getPaymentNarrative()}
+                </p>
               </div>
 
               <div>
@@ -151,7 +179,7 @@ function PaymentDetailPage() {
               <p>
                 <strong>Status:</strong>{" "}
                 <span className={`badge ${getStatusBadgeClass(payment.status)}`}>
-                  {payment.status}
+                  {getStatusLabel(payment.status)}
                 </span>
               </p>
 
@@ -186,7 +214,7 @@ function PaymentDetailPage() {
           </div>
         </>
       )}
-    </Layout>
+    </AppLayout>
   );
 }
 

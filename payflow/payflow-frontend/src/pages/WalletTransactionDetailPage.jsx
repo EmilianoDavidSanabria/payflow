@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api } from "../api/client";
+import { api, getApiErrorMessage } from "../api/client";
 import AppLayout from "../components/AppLayout.jsx";
 import { formatCurrency, formatDate } from "../utils/formatters";
 
@@ -34,7 +34,9 @@ function WalletTransactionDetailPage() {
         if (error.response?.status === 404) {
           setPageError("Wallet transaction not found.");
         } else {
-          setPageError("Could not load wallet transaction detail.");
+          setPageError(
+            getApiErrorMessage(error, "Could not load wallet transaction detail.")
+          );
         }
       } finally {
         setLoading(false);
@@ -69,6 +71,24 @@ function WalletTransactionDetailPage() {
     return status || "-";
   };
 
+  const getTransactionNarrative = (transaction) => {
+    if (!transaction) return "";
+
+    if (transaction.status === "PENDING" && transaction.rail === "MERCADO_PAGO") {
+      return "This top-up is still waiting for external confirmation from Mercado Pago.";
+    }
+
+    if (transaction.status === "COMPLETED") {
+      return "This transaction was completed successfully and its final state has already been applied to your wallet.";
+    }
+
+    if (transaction.status === "FAILED") {
+      return "This transaction finished in a failed state and did not complete successfully.";
+    }
+
+    return "Review the provider state, timestamps, and checkout details below.";
+  };
+
   const headline = useMemo(() => {
     if (!walletTransaction) return "Wallet transaction";
 
@@ -85,12 +105,6 @@ function WalletTransactionDetailPage() {
 
   const amountPrefix = walletTransaction?.transaction_type === "WITHDRAWAL" ? "-" : "+";
 
-  const getErrorMessage = (error, fallback) => {
-    if (error.response?.data?.detail) return error.response.data.detail;
-    if (error.response?.data?.error) return error.response.data.error;
-    return fallback;
-  };
-
   const handleRefreshStatus = async () => {
     try {
       setRefreshingStatus(true);
@@ -100,9 +114,7 @@ function WalletTransactionDetailPage() {
       const previousStatus = walletTransaction?.status;
       const previousProviderStatus = walletTransaction?.provider_status;
 
-      const response = await api.post(
-        `/wallets/me/transactions/${id}/refresh-status/`
-      );
+      const response = await api.post(`/wallets/me/transactions/${id}/refresh-status/`);
 
       const refreshedTransaction = response.data;
       setWalletTransaction(refreshedTransaction);
@@ -113,26 +125,26 @@ function WalletTransactionDetailPage() {
       ) {
         if (refreshedTransaction.status === "COMPLETED") {
           setStatusSuccessMessage(
-            "Transaction status refreshed successfully. The top-up is now completed."
+            "The transaction was refreshed and is now marked as completed."
           );
         } else if (refreshedTransaction.status === "FAILED") {
           setStatusErrorMessage(
-            "Transaction status refreshed. The top-up finished in a failed state."
+            "The transaction was refreshed and ended in a failed state."
           );
         } else {
           setStatusSuccessMessage(
-            "Transaction status refreshed successfully."
+            "The transaction status was refreshed. It is still pending confirmation."
           );
         }
       } else {
         setStatusSuccessMessage(
-          "Transaction status checked. No changes were detected yet."
+          "Status checked successfully. No changes were detected yet."
         );
       }
     } catch (error) {
       console.error("Error refreshing wallet transaction status", error);
       setStatusErrorMessage(
-        getErrorMessage(error, "Could not refresh wallet transaction status.")
+        getApiErrorMessage(error, "Could not refresh wallet transaction status.")
       );
     } finally {
       setRefreshingStatus(false);
@@ -140,9 +152,9 @@ function WalletTransactionDetailPage() {
   };
 
   return (
-    <Layout
+    <AppLayout
       title="Wallet transaction detail"
-      subtitle="Review the full state, timestamps, provider data, and checkout context for a wallet funding operation."
+      subtitle="Review the current state, provider information, timestamps, and checkout context for this wallet transaction."
     >
       {pageError && <div className="message message-error">{pageError}</div>}
 
@@ -224,6 +236,10 @@ function WalletTransactionDetailPage() {
                     {walletTransaction.rail}
                   </span>
                 </div>
+
+                <p style={{ marginTop: "12px", marginBottom: 0, opacity: 0.82 }}>
+                  {getTransactionNarrative(walletTransaction)}
+                </p>
               </div>
 
               <div style={{ minWidth: "220px" }}>
@@ -242,7 +258,7 @@ function WalletTransactionDetailPage() {
 
           {walletTransaction.can_resume_checkout && walletTransaction.checkout_url && (
             <div className="message message-success" style={{ marginBottom: "18px" }}>
-              This top-up is still pending and has an available checkout session.{" "}
+              This top-up still has an active checkout session available.{" "}
               <a
                 href={walletTransaction.checkout_url}
                 target="_blank"
@@ -250,6 +266,7 @@ function WalletTransactionDetailPage() {
               >
                 Continue checkout
               </a>
+              .
             </div>
           )}
 
@@ -265,7 +282,7 @@ function WalletTransactionDetailPage() {
 
                 <div>
                   <strong>Status</strong>
-                  <p style={{ margin: "4px 0 0" }}>{walletTransaction.status}</p>
+                  <p style={{ margin: "4px 0 0" }}>{getStatusLabel(walletTransaction.status)}</p>
                 </div>
 
                 <div>
@@ -354,7 +371,7 @@ function WalletTransactionDetailPage() {
           </div>
         </>
       )}
-    </Layout>
+    </AppLayout>
   );
 }
 

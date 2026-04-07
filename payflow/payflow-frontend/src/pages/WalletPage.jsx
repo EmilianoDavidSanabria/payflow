@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api } from "../api/client";
+import { api, getApiErrorMessage } from "../api/client";
 import AppLayout from "../components/AppLayout.jsx";
 import { formatCurrency, formatDate } from "../utils/formatters";
 
@@ -15,6 +15,7 @@ function WalletPage() {
   const [transactionsLoading, setTransactionsLoading] = useState(true);
   const [submittingTopUp, setSubmittingTopUp] = useState(false);
   const [submittingWithdraw, setSubmittingWithdraw] = useState(false);
+  const [refreshingPage, setRefreshingPage] = useState(false);
 
   const [topUpAmount, setTopUpAmount] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
@@ -32,6 +33,7 @@ function WalletPage() {
   const fetchWallet = async () => {
     const response = await api.get("/wallets/me/");
     setWallet(response.data);
+    return response.data;
   };
 
   const fetchTransactions = async () => {
@@ -48,8 +50,9 @@ function WalletPage() {
         },
       });
 
-      setTransactions(response.data.results);
-      setTransactionsCount(response.data.count);
+      setTransactions(response.data.results || []);
+      setTransactionsCount(response.data.count || 0);
+      return response.data;
     } finally {
       setTransactionsLoading(false);
     }
@@ -57,6 +60,19 @@ function WalletPage() {
 
   const refreshWalletPage = async () => {
     await Promise.all([fetchWallet(), fetchTransactions()]);
+  };
+
+  const clearMessages = () => {
+    setTopUpSuccessMessage("");
+    setTopUpErrorMessage("");
+    setWithdrawSuccessMessage("");
+    setWithdrawErrorMessage("");
+    setPageError("");
+  };
+
+  const isValidPositiveAmount = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0;
   };
 
   useEffect(() => {
@@ -67,7 +83,9 @@ function WalletPage() {
         await refreshWalletPage();
       } catch (error) {
         console.error("Error loading wallet page", error);
-        setPageError("Could not load wallet data.");
+        setPageError(
+          getApiErrorMessage(error, "Could not load your wallet information.")
+        );
       } finally {
         setLoading(false);
       }
@@ -80,6 +98,12 @@ function WalletPage() {
     if (!loading) {
       fetchTransactions().catch((error) => {
         console.error("Error loading filtered wallet transactions", error);
+        setPageError(
+          getApiErrorMessage(
+            error,
+            "Could not refresh wallet transactions for the selected filters."
+          )
+        );
       });
     }
   }, [transactionTypeFilter, transactionStatusFilter, transactionRailFilter]);
@@ -95,25 +119,32 @@ function WalletPage() {
       clearMessages();
 
       try {
+        setRefreshingPage(true);
         await refreshWalletPage();
 
         if (topupStatus === "success") {
           setTopUpSuccessMessage(
-            "Mercado Pago checkout finished successfully. Your top-up status was refreshed."
+            "Your Mercado Pago checkout finished. We refreshed your wallet activity so you can verify whether the funds were already credited."
           );
         } else if (topupStatus === "pending") {
           setTopUpSuccessMessage(
-            "Your top-up is still pending confirmation. We refreshed your wallet activity."
+            "Your payment is still being confirmed. The transaction may remain pending for a short time before it is credited."
           );
         } else if (topupStatus === "failure") {
           setTopUpErrorMessage(
-            "The Mercado Pago checkout did not complete successfully."
+            "The checkout did not finish successfully. You can review the transaction below and try again if needed."
           );
         }
       } catch (error) {
         console.error("Error refreshing wallet after Mercado Pago return", error);
-        setPageError("Could not refresh wallet data after checkout return.");
+        setPageError(
+          getApiErrorMessage(
+            error,
+            "Could not refresh wallet data after returning from checkout."
+          )
+        );
       } finally {
+        setRefreshingPage(false);
         const nextParams = new URLSearchParams(searchParams);
         nextParams.delete("topup");
         setSearchParams(nextParams, { replace: true });
@@ -122,19 +153,6 @@ function WalletPage() {
 
     applyReturnState();
   }, [loading, searchParams, setSearchParams]);
-
-  const getErrorMessage = (error, fallback) => {
-    if (error.response?.data?.detail) return error.response.data.detail;
-    if (error.response?.data?.error) return error.response.data.error;
-    return fallback;
-  };
-
-  const clearMessages = () => {
-    setTopUpSuccessMessage("");
-    setTopUpErrorMessage("");
-    setWithdrawSuccessMessage("");
-    setWithdrawErrorMessage("");
-  };
 
   const getTransactionBadgeClass = (transactionType) => {
     if (transactionType === "TOP_UP") return "badge-success";
@@ -155,10 +173,21 @@ function WalletPage() {
   };
 
   const getStatusLabel = (status) => {
-    if (status === "PENDING") return "Pending";
+    if (status === "PENDING") return "Pending confirmation";
     if (status === "COMPLETED") return "Completed";
     if (status === "FAILED") return "Failed";
     return status || "-";
+  };
+
+  const getProviderStatusLabel = (providerStatus) => {
+    if (!providerStatus) return "-";
+    if (providerStatus === "CHECKOUT_CREATED") return "Checkout created";
+    if (providerStatus === "approved") return "Approved by provider";
+    if (providerStatus === "pending") return "Pending at provider";
+    if (providerStatus === "in_process") return "Processing at provider";
+    if (providerStatus === "rejected") return "Rejected by provider";
+    if (providerStatus === "cancelled") return "Cancelled";
+    return providerStatus;
   };
 
   const getTransactionHeadline = (transaction) => {
@@ -171,6 +200,29 @@ function WalletPage() {
     }
 
     return "Wallet movement";
+  };
+
+  const getTransactionHint = (transaction) => {
+    if (transaction.status === "PENDING" && transaction.rail === "MERCADO_PAGO") {
+      return "Waiting for confirmation from Mercado Pago.";
+    }
+
+    if (transaction.status === "COMPLETED" && transaction.transaction_type === "TOP_UP") {
+      return "Funds were credited to your wallet.";
+    }
+
+    if (
+      transaction.status === "COMPLETED" &&
+      transaction.transaction_type === "WITHDRAWAL"
+    ) {
+      return "Funds were removed from your wallet.";
+    }
+
+    if (transaction.status === "FAILED") {
+      return "The operation ended in a failed state.";
+    }
+
+    return "Review the detail page for full context.";
   };
 
   const transactionSummary = useMemo(() => {
@@ -189,13 +241,21 @@ function WalletPage() {
     return summary;
   }, [transactions]);
 
+  const pendingMercadoPagoTopUps = useMemo(() => {
+    return transactions.filter(
+      (transaction) =>
+        transaction.transaction_type === "TOP_UP" &&
+        transaction.rail === "MERCADO_PAGO" &&
+        transaction.status === "PENDING"
+    );
+  }, [transactions]);
+
   const handleTopUpSubmit = async (e) => {
     e.preventDefault();
-
     clearMessages();
 
-    if (!topUpAmount) {
-      setTopUpErrorMessage("Amount required.");
+    if (!isValidPositiveAmount(topUpAmount)) {
+      setTopUpErrorMessage("Enter a valid amount greater than 0.");
       return;
     }
 
@@ -213,15 +273,20 @@ function WalletPage() {
       await refreshWalletPage();
 
       if (walletTransaction.checkout_url) {
+        setTopUpSuccessMessage(
+          "Top-up intent created. Redirecting you to Mercado Pago checkout..."
+        );
         window.location.href = walletTransaction.checkout_url;
         return;
       }
 
-      setTopUpSuccessMessage("Top-up intent created successfully.");
+      setTopUpSuccessMessage(
+        "Top-up intent created successfully. Review its status in the activity list below."
+      );
     } catch (error) {
       console.error("WALLET TOP UP INTENT ERROR:", error);
       setTopUpErrorMessage(
-        getErrorMessage(error, "Could not create top-up intent.")
+        getApiErrorMessage(error, "Could not create the top-up intent.")
       );
     } finally {
       setSubmittingTopUp(false);
@@ -230,11 +295,10 @@ function WalletPage() {
 
   const handleWithdrawSubmit = async (e) => {
     e.preventDefault();
-
     clearMessages();
 
-    if (!withdrawAmount) {
-      setWithdrawErrorMessage("Amount required.");
+    if (!isValidPositiveAmount(withdrawAmount)) {
+      setWithdrawErrorMessage("Enter a valid amount greater than 0.");
       return;
     }
 
@@ -245,23 +309,40 @@ function WalletPage() {
         amount: withdrawAmount,
       });
 
-      setWithdrawSuccessMessage("Withdrawal completed successfully.");
+      setWithdrawSuccessMessage(
+        "Withdrawal completed successfully and your wallet balance was updated."
+      );
       setWithdrawAmount("");
       await refreshWalletPage();
     } catch (error) {
       console.error("WALLET WITHDRAW ERROR:", error);
       setWithdrawErrorMessage(
-        getErrorMessage(error, "Could not withdraw funds.")
+        getApiErrorMessage(error, "Could not complete the withdrawal.")
       );
     } finally {
       setSubmittingWithdraw(false);
     }
   };
 
+  const handleManualRefresh = async () => {
+    try {
+      setRefreshingPage(true);
+      setPageError("");
+      await refreshWalletPage();
+    } catch (error) {
+      console.error("Error refreshing wallet page", error);
+      setPageError(
+        getApiErrorMessage(error, "Could not refresh wallet information.")
+      );
+    } finally {
+      setRefreshingPage(false);
+    }
+  };
+
   return (
-    <Layout
+    <AppLayout
       title="Wallet"
-      subtitle="Manage your balance, start real top-ups through Mercado Pago, and review wallet funding activity."
+      subtitle="Manage your balance, add funds through Mercado Pago, and review the current status of your wallet activity."
     >
       {pageError && <div className="message message-error">{pageError}</div>}
 
@@ -269,6 +350,15 @@ function WalletPage() {
 
       {!loading && wallet && (
         <>
+          {pendingMercadoPagoTopUps.length > 0 && (
+            <div className="message message-success" style={{ marginBottom: "18px" }}>
+              You have <strong>{pendingMercadoPagoTopUps.length}</strong> Mercado Pago
+              top-up{pendingMercadoPagoTopUps.length > 1 ? "s" : ""} still waiting for
+              confirmation. Open the detail page to continue checkout or refresh the
+              status.
+            </div>
+          )}
+
           <div className="grid grid-3" style={{ marginBottom: "18px" }}>
             <div className="card stat-card">
               <h3>Available balance</h3>
@@ -281,12 +371,12 @@ function WalletPage() {
             </div>
 
             <div className="card stat-card">
-              <h3>Funding rails</h3>
+              <h3>Funding rail</h3>
               <p style={{ margin: "8px 0 10px" }}>
                 <span className="badge badge-info">Mercado Pago checkout</span>
               </p>
               <p style={{ margin: 0, opacity: 0.8 }}>
-                Real top-up intents can be initiated from this page.
+                Real top-ups are created here and then confirmed asynchronously.
               </p>
             </div>
 
@@ -306,8 +396,8 @@ function WalletPage() {
               <p className="eyebrow">Real funding flow</p>
               <h2>Add funds</h2>
               <p style={{ marginTop: 0, opacity: 0.8 }}>
-                Create a real top-up intent, generate the external checkout, and
-                continue through Mercado Pago.
+                Create a real top-up intent and continue in Mercado Pago checkout. The
+                final credit may take a moment to be confirmed.
               </p>
 
               <form onSubmit={handleTopUpSubmit}>
@@ -323,11 +413,13 @@ function WalletPage() {
                     value={topUpAmount}
                     onChange={(e) => setTopUpAmount(e.target.value)}
                     placeholder={wallet?.currency === "ARS" ? "1000.00" : "10.00"}
+                    disabled={submittingTopUp}
                   />
                 </div>
 
                 <p style={{ marginTop: "8px", marginBottom: "16px", opacity: 0.8 }}>
-                  Top-ups through Mercado Pago are processed in {wallet?.currency}.
+                  After creating the intent, you will be redirected to Mercado Pago to
+                  complete the payment.
                 </p>
 
                 <button
@@ -335,20 +427,16 @@ function WalletPage() {
                   className="btn btn-primary"
                   disabled={submittingTopUp}
                 >
-                  {submittingTopUp ? "Creating intent..." : "Add funds"}
+                  {submittingTopUp ? "Creating checkout..." : "Add funds"}
                 </button>
               </form>
 
               {topUpSuccessMessage && (
-                <div className="message message-success">
-                  {topUpSuccessMessage}
-                </div>
+                <div className="message message-success">{topUpSuccessMessage}</div>
               )}
 
               {topUpErrorMessage && (
-                <div className="message message-error">
-                  {topUpErrorMessage}
-                </div>
+                <div className="message message-error">{topUpErrorMessage}</div>
               )}
             </div>
 
@@ -356,8 +444,8 @@ function WalletPage() {
               <p className="eyebrow">Sandbox operation</p>
               <h2>Withdraw funds</h2>
               <p style={{ marginTop: 0, opacity: 0.8 }}>
-                Simulate money leaving the wallet through the current sandbox
-                withdrawal flow.
+                Simulate money leaving the wallet through the current sandbox withdrawal
+                flow.
               </p>
 
               <form onSubmit={handleWithdrawSubmit}>
@@ -373,11 +461,12 @@ function WalletPage() {
                     value={withdrawAmount}
                     onChange={(e) => setWithdrawAmount(e.target.value)}
                     placeholder={wallet?.currency === "ARS" ? "1000.00" : "10.00"}
+                    disabled={submittingWithdraw}
                   />
                 </div>
 
                 <p style={{ marginTop: "8px", marginBottom: "16px", opacity: 0.8 }}>
-                  Withdrawals are processed in {wallet?.currency}.
+                  Withdrawals are processed immediately in the current sandbox flow.
                 </p>
 
                 <button
@@ -396,9 +485,7 @@ function WalletPage() {
               )}
 
               {withdrawErrorMessage && (
-                <div className="message message-error">
-                  {withdrawErrorMessage}
-                </div>
+                <div className="message message-error">{withdrawErrorMessage}</div>
               )}
             </div>
           </div>
@@ -413,7 +500,7 @@ function WalletPage() {
                 {transactionSummary.pending}
               </p>
               <p style={{ margin: 0, opacity: 0.8 }}>
-                Funding operations still waiting for terminal resolution.
+                Operations still waiting for final confirmation.
               </p>
             </div>
 
@@ -433,7 +520,7 @@ function WalletPage() {
                 {transactionSummary.failed}
               </p>
               <p style={{ margin: 0, opacity: 0.8 }}>
-                Operations that ended with a failure state.
+                Operations that ended in a failed state.
               </p>
             </div>
           </div>
@@ -452,7 +539,7 @@ function WalletPage() {
               <div>
                 <h2 style={{ marginBottom: "8px" }}>Wallet funding activity</h2>
                 <p style={{ margin: 0, opacity: 0.8 }}>
-                  Review recent top-ups and withdrawals. Total matching records:{" "}
+                  Review recent top-ups and withdrawals. Matching records:{" "}
                   {transactionsCount}.
                 </p>
               </div>
@@ -460,10 +547,10 @@ function WalletPage() {
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={() => refreshWalletPage()}
-                disabled={transactionsLoading}
+                onClick={handleManualRefresh}
+                disabled={transactionsLoading || refreshingPage}
               >
-                Refresh
+                {refreshingPage ? "Refreshing..." : "Refresh"}
               </button>
             </div>
 
@@ -516,7 +603,7 @@ function WalletPage() {
             ) : transactions.length === 0 ? (
               <div>
                 <p style={{ marginBottom: "8px" }}>
-                  No wallet transactions found for the selected filters.
+                  No wallet transactions match the selected filters.
                 </p>
                 <p style={{ margin: 0, opacity: 0.8 }}>
                   Try widening the filters or create a new funding operation.
@@ -533,72 +620,91 @@ function WalletPage() {
                       <th>Rail</th>
                       <th>Provider status</th>
                       <th>Failure reason</th>
-                      <th>Checkout</th>
                       <th>Created at</th>
+                      <th>Next step</th>
                       <th>Detail</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {transactions.map((transaction) => (
-                      <tr key={transaction.id}>
-                        <td>
-                          <div style={{ display: "grid", gap: "8px" }}>
-                            <strong>{getTransactionHeadline(transaction)}</strong>
-                            <div>
-                              <span
-                                className={`badge ${getTransactionBadgeClass(
-                                  transaction.transaction_type
-                                )}`}
-                              >
-                                {transaction.transaction_type}
-                              </span>
+                    {transactions.map((transaction) => {
+                      const canContinueCheckout =
+                        transaction.status === "PENDING" &&
+                        transaction.transaction_type === "TOP_UP" &&
+                        transaction.rail === "MERCADO_PAGO" &&
+                        !!transaction.checkout_url;
+
+                      return (
+                        <tr key={transaction.id}>
+                          <td>
+                            <div style={{ display: "grid", gap: "8px" }}>
+                              <strong>{getTransactionHeadline(transaction)}</strong>
+                              <div>
+                                <span
+                                  className={`badge ${getTransactionBadgeClass(
+                                    transaction.transaction_type
+                                  )}`}
+                                >
+                                  {transaction.transaction_type}
+                                </span>
+                              </div>
+                              <small style={{ opacity: 0.75 }}>
+                                {getTransactionHint(transaction)}
+                              </small>
                             </div>
-                          </div>
-                        </td>
+                          </td>
 
-                        <td>{formatCurrency(transaction.amount, wallet.currency)}</td>
+                          <td>{formatCurrency(transaction.amount, wallet.currency)}</td>
 
-                        <td>
-                          <span
-                            className={`badge ${getStatusBadgeClass(transaction.status)}`}
-                          >
-                            {getStatusLabel(transaction.status)}
-                          </span>
-                        </td>
-
-                        <td>
-                          <span className={`badge ${getRailBadgeClass(transaction.rail)}`}>
-                            {transaction.rail}
-                          </span>
-                        </td>
-
-                        <td>{transaction.provider_status || "-"}</td>
-
-                        <td>{transaction.failure_reason || "-"}</td>
-
-                        <td>
-                          {transaction.checkout_url ? (
-                            <a
-                              href={transaction.checkout_url}
-                              target="_blank"
-                              rel="noreferrer"
+                          <td>
+                            <span
+                              className={`badge ${getStatusBadgeClass(
+                                transaction.status
+                              )}`}
                             >
-                              Open checkout
-                            </a>
-                          ) : (
-                            "-"
-                          )}
-                        </td>
+                              {getStatusLabel(transaction.status)}
+                            </span>
+                          </td>
 
-                        <td>{formatDate(transaction.created_at)}</td>
+                          <td>
+                            <span
+                              className={`badge ${getRailBadgeClass(transaction.rail)}`}
+                            >
+                              {transaction.rail}
+                            </span>
+                          </td>
 
-                        <td>
-                          <Link to={`/wallet/transactions/${transaction.id}`}>
-                            View detail
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
+                          <td>{getProviderStatusLabel(transaction.provider_status)}</td>
+
+                          <td>{transaction.failure_reason || "-"}</td>
+
+                          <td>{formatDate(transaction.created_at)}</td>
+
+                          <td>
+                            {canContinueCheckout ? (
+                              <a
+                                href={transaction.checkout_url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Continue checkout
+                              </a>
+                            ) : transaction.status === "PENDING" ? (
+                              "Wait or refresh detail"
+                            ) : transaction.status === "FAILED" ? (
+                              "Review failure"
+                            ) : (
+                              "Completed"
+                            )}
+                          </td>
+
+                          <td>
+                            <Link to={`/wallet/transactions/${transaction.id}`}>
+                              View detail
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -606,7 +712,7 @@ function WalletPage() {
           </div>
         </>
       )}
-    </Layout>
+    </AppLayout>
   );
 }
 
