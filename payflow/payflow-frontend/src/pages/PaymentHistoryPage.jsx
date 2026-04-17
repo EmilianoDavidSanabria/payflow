@@ -104,7 +104,7 @@ function PaymentHistoryPage() {
   }, [payments]);
 
   return (
-    <Layout
+    <AppLayout
       title="Payment History"
       subtitle="Review sent and received payments with filtering and detail views."
     >
@@ -333,7 +333,7 @@ function PaymentHistoryPage() {
           </div>
         </>
       )}
-    </Layout>
+    </AppLayout>
   );
 }
 

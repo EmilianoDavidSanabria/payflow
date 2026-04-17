@@ -37,7 +37,7 @@ function MetricsPage() {
   }, []);
 
   return (
-    <Layout
+    <AppLayout
       title="Metrics"
       subtitle="Estado técnico general del sistema."
     >
@@ -83,7 +83,7 @@ function MetricsPage() {
           </div>
         </div>
       )}
-    </Layout>
+    </AppLayout>
   );
 }
 

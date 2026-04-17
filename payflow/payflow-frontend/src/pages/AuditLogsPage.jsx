@@ -68,7 +68,7 @@ function AuditLogsPage() {
   };
 
   return (
-    <Layout
+    <AppLayout
       title="Audit Logs"
       subtitle="Trazabilidad de eventos relevantes de tu cuenta."
     >
@@ -222,7 +222,7 @@ function AuditLogsPage() {
           </div>
         </>
       )}
-    </Layout>
+    </AppLayout>
   );
 }
 
