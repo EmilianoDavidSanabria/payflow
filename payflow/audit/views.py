@@ -18,19 +18,11 @@ class AuditLogListView(APIView):
 
         logs = AuditLog.objects.filter(user=request.user)
 
-        allowed_actions = {
-            "all",
-            "PAYMENT_CREATED",
-            "PAYMENT_COMPLETED",
-            "WALLET_UPDATED",
-            "PAYMENT_REQUEST_CREATED",
-            "PAYMENT_REQUEST_ACCEPTED",
-            "PAYMENT_REQUEST_REJECTED",
-        }
+        allowed_actions = {"all"} | {choice[0] for choice in AuditLog.ACTION_CHOICES}
 
         if action not in allowed_actions:
             return error_response(
-                "action must be one of: all, PAYMENT_CREATED, PAYMENT_COMPLETED, WALLET_UPDATED, PAYMENT_REQUEST_CREATED, PAYMENT_REQUEST_ACCEPTED, PAYMENT_REQUEST_REJECTED",
+                "action must be one of: all, " + ", ".join(sorted(allowed_actions - {"all"})),
                 status.HTTP_400_BAD_REQUEST,
             )
 
@@ -42,11 +34,12 @@ class AuditLogListView(APIView):
             "payment",
             "wallet",
             "payment_request",
+            "wallet_transaction",
         }
 
         if entity_type not in allowed_entity_types:
             return error_response(
-                "entity_type must be one of: all, payment, wallet, payment_request",
+                "entity_type must be one of: all, payment, wallet, payment_request, wallet_transaction",
                 status.HTTP_400_BAD_REQUEST,
             )
 

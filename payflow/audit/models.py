@@ -15,6 +15,12 @@ class AuditLog(models.Model):
         ("WALLET_TOP_UP_FAILED", "Wallet Top Up Failed"),
         ("WALLET_WITHDRAWAL_CREATED", "Wallet Withdrawal Created"),
         ("WALLET_WITHDRAWAL_COMPLETED", "Wallet Withdrawal Completed"),
+        ("PAYMENT_INTENT_CREATED", "Payment Intent Created"),
+        ("PAYMENT_CHECKOUT_CREATED", "Payment Checkout Created"),
+        ("PAYMENT_APPROVED", "Payment Approved"),
+        ("PAYMENT_FAILED", "Payment Failed"),
+        ("PAYMENT_RECONCILED", "Payment Reconciled"),
+        ("WEBHOOK_RECEIVED", "Webhook Received"),
     ]
 
     user = models.ForeignKey(

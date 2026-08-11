@@ -136,7 +136,7 @@ class PaymentService:
             }
         )
 
-        # payment_completed_event(payment)
+        transaction.on_commit(lambda: payment_completed_event(payment))
 
         return payment
 

@@ -36,3 +36,7 @@ dist/
 
 # Migrations cache
 *.sqlite3
+
+# Coverage
+.coverage
+htmlcov/

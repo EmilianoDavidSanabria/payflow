@@ -18,7 +18,9 @@ services:
       - "6379:6379"
 
   web:
-    build: .
+    build:
+      context: ..
+      dockerfile: Dockerfile
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - .:/app
@@ -36,7 +38,9 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/0
 
   worker:
-    build: .
+    build:
+      context: ..
+      dockerfile: Dockerfile
     command: celery -A payflow worker -l info
     volumes:
       - .:/app
