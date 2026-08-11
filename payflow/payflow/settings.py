@@ -9,6 +9,7 @@ from celery.schedules import crontab
 from dotenv import load_dotenv
 import dj_database_url
 from corsheaders.defaults import default_headers
+from django.core.exceptions import ImproperlyConfigured
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -28,8 +29,31 @@ def env_list(name, default=""):
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+IS_PRODUCTION = ENVIRONMENT == "production"
+
+
+def env_required_in_production(name, dev_default):
+    """
+    Returns the env var value if set. If it's missing AND ENVIRONMENT=production,
+    fails loudly instead of silently falling back to a known dev value.
+    Set ENVIRONMENT=production in Railway to enable this check.
+    """
+    value = os.getenv(name)
+
+    if value:
+        return value
+
+    if IS_PRODUCTION:
+        raise ImproperlyConfigured(
+            f"{name} must be set via an environment variable when ENVIRONMENT=production."
+        )
+
+    return dev_default
+
+
 # Quick-start development settings
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-insecure-secret-key")
+SECRET_KEY = env_required_in_production("SECRET_KEY", "dev-insecure-secret-key")
 DEBUG = env_bool("DEBUG", default=False)
 
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "127.0.0.1,localhost")
@@ -162,7 +186,7 @@ REST_FRAMEWORK = {
     ),
 }
 
-PAYFLOW_WEBHOOK_SECRET = os.getenv("PAYFLOW_WEBHOOK_SECRET", "dev-webhook-secret")
+PAYFLOW_WEBHOOK_SECRET = env_required_in_production("PAYFLOW_WEBHOOK_SECRET", "dev-webhook-secret")
 
 MERCADO_PAGO_ACCESS_TOKEN = os.getenv("MERCADO_PAGO_ACCESS_TOKEN", "")
 MERCADO_PAGO_WEBHOOK_URL = os.getenv("MERCADO_PAGO_WEBHOOK_URL", "")

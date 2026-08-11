@@ -1,3 +1,5 @@
+import hmac
+
 from django.conf import settings
 
 from rest_framework.views import APIView
@@ -21,8 +23,9 @@ class BaseWebhookView(APIView):
 
     def validate_secret(self, request):
         provided_secret = request.headers.get("X-Webhook-Secret")
+        expected_secret = settings.PAYFLOW_WEBHOOK_SECRET
 
-        if provided_secret != settings.PAYFLOW_WEBHOOK_SECRET:
+        if not provided_secret or not hmac.compare_digest(provided_secret, expected_secret):
             return error_response(
                 "Invalid webhook secret",
                 status.HTTP_403_FORBIDDEN,

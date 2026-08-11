@@ -17,12 +17,12 @@ from ledger.models import LedgerEntry
 from audit.models import AuditLog
 from payments.serializers import PaymentSerializer
 from wallets.serializers import WalletSerializer
-
+from rest_framework.permissions import IsAuthenticated, AllowAny
 User = get_user_model()
 
 
 class HealthView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         return Response(

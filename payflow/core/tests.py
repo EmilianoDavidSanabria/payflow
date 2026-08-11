@@ -190,13 +190,21 @@ def test_dashboard_summary_limits_recent_activity_to_five_items():
 
 
 @pytest.mark.django_db
-def test_core_endpoints_require_authentication():
+def test_health_endpoint_is_public():
     client = APIClient()
 
-    health_response = client.get("/core/health/")
+    response = client.get("/core/health/")
+
+    assert response.status_code == 200
+    assert response.data["status"] == "ok"
+
+
+@pytest.mark.django_db
+def test_metrics_and_dashboard_require_authentication():
+    client = APIClient()
+
     metrics_response = client.get("/core/metrics/")
     dashboard_response = client.get("/core/dashboard-summary/")
 
-    assert health_response.status_code == 401
     assert metrics_response.status_code == 401
     assert dashboard_response.status_code == 401
