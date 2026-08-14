@@ -184,6 +184,13 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.ScopedRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "login": "5/min",
+        "register": "10/hour",
+    },
 }
 
 PAYFLOW_WEBHOOK_SECRET = env_required_in_production("PAYFLOW_WEBHOOK_SECRET", "dev-webhook-secret")

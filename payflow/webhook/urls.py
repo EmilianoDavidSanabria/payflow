@@ -5,6 +5,10 @@ from webhook.views import (
     WalletTopUpFailWebhookView,
 )
 from webhook.mercadopago_webhook_views import MercadoPagoWebhookView
+from webhook.subscription_views import (
+    WebhookListCreateView,
+    WebhookDetailView,
+)
 
 urlpatterns = [
     path(
@@ -21,5 +25,15 @@ urlpatterns = [
         "mercadopago/",
         MercadoPagoWebhookView.as_view(),
         name="mercadopago-webhook",
+    ),
+    path(
+        "subscriptions/",
+        WebhookListCreateView.as_view(),
+        name="webhook-subscription-list",
+    ),
+    path(
+        "subscriptions/<int:webhook_id>/",
+        WebhookDetailView.as_view(),
+        name="webhook-subscription-detail",
     ),
 ]

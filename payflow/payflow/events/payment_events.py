@@ -15,4 +15,5 @@ def payment_completed_event(payment):
     dispatch_webhook.delay(
         "payment_completed",
         payload,
+        user_ids=[payment.sender_id, payment.receiver_id],
     )
