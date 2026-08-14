@@ -1,6 +1,5 @@
 from uuid import uuid4
 from django.db import transaction, IntegrityError
-from django.db import transaction
 from django.utils import timezone
 from services.risk_policy_service import RiskPolicyService
 from payments.models import Payment, PaymentRequest
