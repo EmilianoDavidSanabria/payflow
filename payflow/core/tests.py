@@ -25,28 +25,40 @@ def test_health_endpoint_returns_ok():
     assert "message" in response.data
 
 
-@pytest.mark.django_db
-def test_metrics_endpoint_returns_expected_keys():
-    user = User.objects.create_user(username="core_metrics_user", password="pass")
 
+@pytest.mark.django_db
+def test_metrics_endpoint_requires_staff():
+    user = User.objects.create_user(username="core_metrics_user", password="pass")
     client = APIClient()
     client.force_authenticate(user)
 
     response = client.get("/core/metrics/")
 
-    assert response.status_code == 200
+    assert response.status_code == 403
 
+
+@pytest.mark.django_db
+def test_metrics_endpoint_returns_expected_keys():
+    staff_user = User.objects.create_user(
+        username="core_metrics_staff", password="pass", is_staff=True
+    )
+    client = APIClient()
+    client.force_authenticate(staff_user)
+
+    response = client.get("/core/metrics/")
+
+    assert response.status_code == 200
     assert "total_users" in response.data
     assert "total_wallets" in response.data
     assert "total_payments" in response.data
     assert "total_ledger_entries" in response.data
     assert "total_audit_logs" in response.data
-
     assert "completed_payments" in response.data
     assert "failed_payments" in response.data
     assert "pending_payments" in response.data
     assert "total_volume_transferred" in response.data
     assert "payments_last_24h" in response.data
+
 
 
 @pytest.mark.django_db

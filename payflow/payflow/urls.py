@@ -19,7 +19,7 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from users.auth_views import EmailTokenObtainPairView
+from users.auth_views import EmailTokenObtainPairView, LogoutView
 
 def test_ping(request):
     return JsonResponse({"ok": True, "service": "payflow-backend"})
@@ -30,6 +30,7 @@ urlpatterns = [
 
     path("api/token/", EmailTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("api/token/logout/", LogoutView.as_view(), name="token_logout"),
 
     path("payments/", include("payments.urls")),
     path("wallets/", include("wallets.urls")),

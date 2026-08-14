@@ -17,7 +17,7 @@ from ledger.models import LedgerEntry
 from audit.models import AuditLog
 from payments.serializers import PaymentSerializer
 from wallets.serializers import WalletSerializer
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 User = get_user_model()
 
 
@@ -35,7 +35,14 @@ class HealthView(APIView):
 
 
 class MetricsView(APIView):
-    permission_classes = [IsAuthenticated]
+    """
+    Platform-wide financial and operational totals (total volume, user
+    counts, failure rates, etc). This aggregates data across every user
+    on the platform, so it's restricted to staff — a regular authenticated
+    user has no business seeing other users' aggregate activity.
+    """
+
+    permission_classes = [IsAdminUser]
 
     def get(self, request):
         completed_payments_qs = Payment.objects.filter(status="COMPLETED")

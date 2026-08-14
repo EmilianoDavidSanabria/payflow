@@ -82,6 +82,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
 
     "users",
@@ -191,6 +192,15 @@ REST_FRAMEWORK = {
         "login": "5/min",
         "register": "10/hour",
     },
+}
+
+SIMPLE_JWT = {
+    # Every time a refresh token is used, the old one is blacklisted and a
+    # new one issued. This bounds how long a leaked refresh token stays
+    # useful, and lets logout actually revoke access server-side instead of
+    # just discarding the token client-side.
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 PAYFLOW_WEBHOOK_SECRET = env_required_in_production("PAYFLOW_WEBHOOK_SECRET", "dev-webhook-secret")

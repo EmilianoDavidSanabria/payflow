@@ -31,7 +31,12 @@ class WebhookService:
                 requests.post(
                     webhook.url,
                     json=payload,
-                    timeout=5
+                    timeout=5,
+                    # The URL was validated against internal/private targets
+                    # at creation time, but a remote server could still
+                    # redirect us to an internal address at send time.
+                    # Refusing to follow redirects closes that gap.
+                    allow_redirects=False,
                 )
 
             except Exception:
