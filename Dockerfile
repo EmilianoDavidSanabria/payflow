@@ -10,11 +10,11 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /app/requirements.txt
+COPY payflow/requirements.txt /app/requirements.txt
 
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r /app/requirements.txt
 
-COPY . /app/
+COPY payflow /app/
 
 CMD ["sh", "-c", "python manage.py collectstatic --noinput && python manage.py migrate && gunicorn payflow.wsgi:application --bind 0.0.0.0:$PORT"]

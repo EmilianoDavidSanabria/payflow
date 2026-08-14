@@ -1,5 +1,5 @@
 from datetime import datetime
-
+from rest_framework.exceptions import APIException
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
 from django.db.models import Q, Count
@@ -34,50 +34,43 @@ class CreatePaymentView(APIView):
             context={"request": request}
         )
         serializer.is_valid(raise_exception=True)
-
+        
         idempotency_key = request.headers.get("Idempotency-Key")
-
         if not idempotency_key:
             return Response(
                 {"error": "Idempotency-Key header required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
+            
         request_path = request.path
         request_method = request.method
-
+        
         try:
             existing = IdempotencyService.get_existing_response(
-                request.user,
-                idempotency_key,
-                request_path,
-                request_method,
+                request.user, idempotency_key, request_path, request_method,
             )
         except ValueError as exc:
             return Response(
                 {"error": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
+            
         if existing:
             body, status_code = existing
             return Response(body, status=status_code)
-
+            
         try:
             record = IdempotencyService.create_record(
-                request.user,
-                idempotency_key,
-                request_path,
-                request_method,
+                request.user, idempotency_key, request_path, request_method,
             )
         except ValueError as exc:
             return Response(
                 {"error": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
+            
         receiver = serializer.validated_data["receiver_username"]
-
+        
         try:
             payment = PaymentService.create_payment(
                 sender=request.user,
@@ -85,42 +78,31 @@ class CreatePaymentView(APIView):
                 amount=serializer.validated_data["amount"],
                 idempotency_key=idempotency_key
             )
-        except InsufficientBalance:
-            response_body = {"error": "Insufficient balance"}
+        except APIException as exc:
+            response_body = {"error": str(exc.detail)}
             IdempotencyService.save_response(
                 record,
                 response_body,
-                status.HTTP_400_BAD_REQUEST
+                exc.status_code,
             )
             return Response(
                 response_body,
-                status=status.HTTP_400_BAD_REQUEST
+                status=exc.status_code,
             )
         except Exception as e:
+            # Falla inesperada/transitoria: NO la cacheamos.
             print("CREATE PAYMENT ERROR:", repr(e))
-            response_body = {"error": f"Payment could not be created: {str(e)}"}
-            IdempotencyService.save_response(
-                record,
-                response_body,
-                status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            IdempotencyService.discard_record(record)
             return Response(
-                response_body,
+                {"error": "Payment could not be created, please retry"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
+            
         response_body = PaymentSerializer(payment).data
+        IdempotencyService.save_response(record, response_body, status.HTTP_201_CREATED)
+        return Response(response_body, status=status.HTTP_201_CREATED)
 
-        IdempotencyService.save_response(
-            record,
-            response_body,
-            status.HTTP_201_CREATED
-        )
 
-        return Response(
-            response_body,
-            status=status.HTTP_201_CREATED
-        )
 
 
 class PaymentHistoryView(APIView):

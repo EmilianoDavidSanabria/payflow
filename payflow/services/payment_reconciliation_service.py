@@ -1,13 +1,18 @@
+from datetime import timedelta
+
+from django.utils import timezone
+
 from core.exceptions import InvalidWalletTransactionOperation
 from wallets.models import WalletTransaction
 from services.mercadopago_service import MercadoPagoService
 from services.wallet_funding_service import WalletFundingService
 from services.payment_event_service import PaymentEventService
-from payments.events import PAYMENT_RECONCILED
+from payments.events import PAYMENT_RECONCILED, PAYMENT_RECONCILIATION_DISCREPANCY
 
 
 class PaymentReconciliationService:
     TERMINAL_FAILURE_STATUSES = {"rejected", "cancelled", "canceled"}
+    STALE_PENDING_MINUTES = 30
 
     @staticmethod
     def _resolve_topup_transaction(tx, payment):
@@ -93,6 +98,49 @@ class PaymentReconciliationService:
         )
 
     @staticmethod
+    def flag_stale_pending_topups(older_than_minutes=None):
+        """
+        Un top-up que sigue PENDING mucho después de haberse creado, y que
+        ya intentamos reconciliar sin éxito, es una inconsistencia real
+        entre PayFlow y el proveedor (no un simple estado transitorio).
+        Esto lo deja registrado como evento auditable en vez de dejarlo
+        pasar en silencio.
+        """
+        threshold_minutes = (
+            older_than_minutes
+            if older_than_minutes is not None
+            else PaymentReconciliationService.STALE_PENDING_MINUTES
+        )
+        threshold = timezone.now() - timedelta(minutes=threshold_minutes)
+
+        stale_transactions = WalletTransaction.objects.filter(
+            transaction_type="TOP_UP",
+            rail="MERCADO_PAGO",
+            status="PENDING",
+            created_at__lt=threshold,
+        )
+
+        flagged_ids = []
+
+        for tx in stale_transactions:
+            PaymentEventService.log_event(
+                action=PAYMENT_RECONCILIATION_DISCREPANCY,
+                entity_id=tx.id,
+                metadata={
+                    "rail": tx.rail,
+                    "external_reference": tx.external_reference,
+                    "amount": str(tx.amount),
+                    "minutes_pending": int(
+                        (timezone.now() - tx.created_at).total_seconds() // 60
+                    ),
+                    "reason": "topup_stuck_pending_past_threshold",
+                },
+            )
+            flagged_ids.append(tx.id)
+
+        return flagged_ids
+
+    @staticmethod
     def reconcile_pending_topups():
         pending_transactions = WalletTransaction.objects.filter(
             transaction_type="TOP_UP",
@@ -124,3 +172,5 @@ class PaymentReconciliationService:
                         "error": str(exc),
                     },
                 )
+
+        PaymentReconciliationService.flag_stale_pending_topups()

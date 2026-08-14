@@ -1,8 +1,8 @@
 from uuid import uuid4
-
+from django.db import transaction, IntegrityError
 from django.db import transaction
 from django.utils import timezone
-
+from services.risk_policy_service import RiskPolicyService
 from payments.models import Payment, PaymentRequest
 from wallets.models import Wallet
 
@@ -37,6 +37,8 @@ class PaymentService:
         if amount <= 0:
             raise InvalidPaymentAmount()
 
+        RiskPolicyService.validate_payment(sender, amount)
+
         wallet_ids = sorted([sender.id, receiver.id])
 
         locked_wallets = Wallet.objects.select_for_update().filter(
@@ -60,12 +62,16 @@ class PaymentService:
         if sender_wallet.balance < amount:
             raise InsufficientBalance()
 
-        payment = Payment.objects.create(
-            sender=sender,
-            receiver=receiver,
-            amount=amount,
-            idempotency_key=idempotency_key,
-        )
+        try:
+            with transaction.atomic():
+                payment = Payment.objects.create(
+                    sender=sender,
+                    receiver=receiver,
+                    amount=amount,
+                    idempotency_key=idempotency_key,
+                )
+        except IntegrityError:
+            return Payment.objects.get(idempotency_key=idempotency_key)
 
         reference = f"payment_{payment.id}"
 
@@ -139,6 +145,7 @@ class PaymentService:
         transaction.on_commit(lambda: payment_completed_event(payment))
 
         return payment
+
 
     @staticmethod
     def create_payment_request(requester, requested_from, amount):

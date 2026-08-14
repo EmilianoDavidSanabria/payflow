@@ -59,3 +59,10 @@ class InvalidWalletTransactionOperation(APIException):
     status_code = 400
     default_detail = "Invalid wallet transaction operation"
     default_code = "invalid_wallet_transaction_operation"
+
+class RiskCheckFailed(APIException):
+    status_code = 400
+    default_detail = "Operation blocked by risk policy"
+    default_code = "risk_check_failed"
+
+    

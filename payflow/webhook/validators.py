@@ -3,6 +3,10 @@ import socket
 from urllib.parse import urlparse
 
 from rest_framework import serializers
+import hashlib
+import hmac
+
+from django.conf import settings
 
 ALLOWED_SCHEMES = {"http", "https"}
 
@@ -66,3 +70,53 @@ def validate_webhook_url(url):
             raise serializers.ValidationError("Webhook URL host could not be validated")
 
     return url
+
+def validate_mercadopago_signature(request, data_id):
+    """
+    Valida el header x-signature que manda Mercado Pago para confirmar que
+    el webhook realmente viene de ellos. Sin esto, cualquiera puede pegarle
+    a este endpoint con un payment_id ajeno y forzar una llamada real a la
+    API de MP (costo + superficie de DoS), aunque no pueda falsificar el
+    resultado en sí (eso ya lo protege el fetch a la API real).
+    Doc: https://www.mercadopago.com.ar/developers/es/docs/checkout-api/webhooks
+    """
+    secret = getattr(settings, "MERCADO_PAGO_WEBHOOK_SECRET", "")
+
+    if not secret:
+        print(
+            "[MP WEBHOOK] WARNING: MERCADO_PAGO_WEBHOOK_SECRET no configurado, "
+            "se está aceptando el webhook SIN validar firma",
+            flush=True,
+        )
+        return True
+
+    signature_header = request.headers.get("x-signature", "")
+    request_id = request.headers.get("x-request-id", "")
+
+    if not signature_header:
+        return False
+
+    try:
+        parts = dict(
+            item.strip().split("=", 1)
+            for item in signature_header.split(",")
+            if "=" in item
+        )
+    except ValueError:
+        return False
+
+    ts = parts.get("ts")
+    received_hash = parts.get("v1")
+
+    if not ts or not received_hash:
+        return False
+
+    manifest = f"id:{data_id};request-id:{request_id};ts:{ts};"
+
+    expected_hash = hmac.new(
+        secret.encode("utf-8"),
+        manifest.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    return hmac.compare_digest(expected_hash, received_hash)

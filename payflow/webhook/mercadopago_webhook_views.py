@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
-
+from webhook.validators import validate_mercadopago_signature
 from services.mercadopago_service import MercadoPagoService
 from services.wallet_funding_service import WalletFundingService
 from services.payment_event_service import PaymentEventService
@@ -108,6 +108,16 @@ class MercadoPagoWebhookView(APIView):
                 print("[MP WEBHOOK] ignored: missing payment_id", flush=True)
                 return Response({"status": "ignored"}, status=status.HTTP_200_OK)
 
+            if not validate_mercadopago_signature(request, payment_id):
+                print(
+                    f"[MP WEBHOOK] invalid signature | payment_id={payment_id}",
+                    flush=True,
+                )
+                return Response(
+                    {"detail": "Invalid signature"},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            
             event_id = self._extract_event_id(request, body, payment_id)
 
             print(
