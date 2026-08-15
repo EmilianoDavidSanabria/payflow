@@ -2,11 +2,12 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from django.db.models import Q
 
 from core.api_errors import error_response
 from core.exceptions import InsufficientBalance, InvalidWalletTransactionOperation
 from core.pagination import paginate_queryset
-from services.idempotency_service import IdempotencyService
+from services.idempotency_service import IdempotencyService, IdempotencyKeyInProgress
 from services.wallet_funding_service import WalletFundingService
 from services.risk_policy_service import RiskPolicyService
 from services.payment_reconciliation_service import PaymentReconciliationService
@@ -38,10 +39,23 @@ def _get_existing_idempotent_response(request):
 
 
 def _create_idempotency_record(request):
+    """
+    Devuelve (record, is_new):
+      - (None, True) si la request no mandó Idempotency-Key: no hay nada
+        que cachear, seguir como flujo normal.
+      - (record, True) si esta request ganó la carrera por esa key: es
+        dueña de ejecutar la operación y debe guardar el resultado.
+      - (record, False) si otra request concurrente ya terminó con esa
+        misma key: el caller debe devolver record.response_body /
+        record.response_code tal cual, sin volver a ejecutar nada.
+
+    Puede levantar IdempotencyKeyInProgress si otra request con la misma
+    key está siendo procesada ahora mismo (o quedó a medias).
+    """
     idempotency_key = _get_idempotency_key(request)
 
     if not idempotency_key:
-        return None
+        return None, True
 
     return IdempotencyService.create_record(
         user=request.user,
@@ -68,9 +82,17 @@ class WalletTopUpView(APIView):
             return Response(body, status=status_code)
 
         try:
-            record = _create_idempotency_record(request)
+            record, is_new = _create_idempotency_record(request)
         except ValueError as exc:
             return error_response(str(exc), status.HTTP_400_BAD_REQUEST)
+        except IdempotencyKeyInProgress:
+            return error_response(
+                "A request with this Idempotency-Key is already being processed",
+                status.HTTP_409_CONFLICT,
+            )
+
+        if record and not is_new:
+            return Response(record.response_body, status=record.response_code)
 
         try:
             wallet_transaction = WalletFundingService.top_up(
@@ -117,9 +139,17 @@ class WalletWithdrawalView(APIView):
             return Response(body, status=status_code)
 
         try:
-            record = _create_idempotency_record(request)
+            record, is_new = _create_idempotency_record(request)
         except ValueError as exc:
             return error_response(str(exc), status.HTTP_400_BAD_REQUEST)
+        except IdempotencyKeyInProgress:
+            return error_response(
+                "A request with this Idempotency-Key is already being processed",
+                status.HTTP_409_CONFLICT,
+            )
+
+        if record and not is_new:
+            return Response(record.response_body, status=record.response_code)
 
         try:
             RiskPolicyService.validate_withdraw(
@@ -182,22 +212,13 @@ class WalletTransactionListView(APIView):
         allowed_rails = {"all", "SANDBOX", "BANK_TRANSFER", "CARD", "MERCADO_PAGO"}
 
         if transaction_type not in allowed_types:
-            return error_response(
-                "type must be one of: all, TOP_UP, WITHDRAWAL",
-                status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response("Invalid transaction type", status.HTTP_400_BAD_REQUEST)
 
         if transaction_status not in allowed_statuses:
-            return error_response(
-                "status must be one of: all, PENDING, COMPLETED, FAILED",
-                status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response("Invalid transaction status", status.HTTP_400_BAD_REQUEST)
 
         if rail not in allowed_rails:
-            return error_response(
-                "rail must be one of: all, SANDBOX, BANK_TRANSFER, CARD, MERCADO_PAGO",
-                status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response("Invalid rail", status.HTTP_400_BAD_REQUEST)
 
         if transaction_type != "all":
             transactions = transactions.filter(transaction_type=transaction_type)
@@ -211,89 +232,25 @@ class WalletTransactionListView(APIView):
         if provider_status != "all":
             transactions = transactions.filter(provider_status=provider_status)
 
-        transactions = transactions.select_related("wallet").order_by("-created_at")
+        transactions = transactions.order_by("-created_at")
 
         pagination, error_response_result = paginate_queryset(transactions, request)
-
         if error_response_result:
             return error_response_result
 
         serializer = WalletTransactionSerializer(
             pagination["results"],
             many=True,
+            context={"request": request}
         )
 
-        return Response(
-            {
-                "count": pagination["count"],
-                "page": pagination["page"],
-                "page_size": pagination["page_size"],
-                "total_pages": pagination["total_pages"],
-                "type": transaction_type,
-                "status": transaction_status,
-                "rail": rail,
-                "provider_status": provider_status,
-                "results": serializer.data,
-            },
-            status=status.HTTP_200_OK,
-        )
-
-
-class WalletTransactionDetailView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, transaction_id):
-        wallet_transaction = (
-            WalletTransaction.objects
-            .select_related("wallet")
-            .filter(
-                id=transaction_id,
-                wallet__user=request.user,
-            )
-            .first()
-        )
-
-        if wallet_transaction is None:
-            return error_response(
-                "Wallet transaction not found",
-                status.HTTP_404_NOT_FOUND,
-            )
-
-        serializer = WalletTransactionDetailSerializer(wallet_transaction)
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
-
-class WalletTransactionRefreshStatusView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, transaction_id):
-        wallet_transaction = (
-            WalletTransaction.objects
-            .select_related("wallet")
-            .filter(
-                id=transaction_id,
-                wallet__user=request.user,
-            )
-            .first()
-        )
-
-        if wallet_transaction is None:
-            return error_response(
-                "Wallet transaction not found",
-                status.HTTP_404_NOT_FOUND,
-            )
-
-        try:
-            wallet_transaction = PaymentReconciliationService.refresh_topup_status(
-                wallet_transaction
-            )
-        except InvalidWalletTransactionOperation as exc:
-            return error_response(str(exc.detail), status.HTTP_400_BAD_REQUEST)
-        except Exception as exc:
-            return error_response(
-                f"Could not refresh wallet transaction status: {str(exc)}",
-                status.HTTP_502_BAD_GATEWAY,
-            )
-
-        serializer = WalletTransactionDetailSerializer(wallet_transaction)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response({
+            "count": pagination["count"],
+            "page": pagination["page"],
+            "page_size": pagination["page_size"],
+            "total_pages": pagination["total_pages"],
+            "type": transaction_type,
+            "status": transaction_status,
+            "rail": rail,
+            "results": serializer.data,
+        }, status=status.HTTP_200_OK)

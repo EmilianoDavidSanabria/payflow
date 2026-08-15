@@ -18,7 +18,7 @@ from payments.serializers import (
     FrequentRecipientSerializer,
 )
 from services.payment_service import PaymentService
-from services.idempotency_service import IdempotencyService
+from services.idempotency_service import IdempotencyService, IdempotencyKeyInProgress
 from core.exceptions import InsufficientBalance
 from core.pagination import paginate_queryset
 
@@ -60,7 +60,7 @@ class CreatePaymentView(APIView):
             return Response(body, status=status_code)
             
         try:
-            record = IdempotencyService.create_record(
+            record, is_new = IdempotencyService.create_record(
                 request.user, idempotency_key, request_path, request_method,
             )
         except ValueError as exc:
@@ -68,6 +68,17 @@ class CreatePaymentView(APIView):
                 {"error": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        except IdempotencyKeyInProgress:
+            return Response(
+                {"error": "A request with this Idempotency-Key is already being processed"},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        if not is_new:
+            # Otra request concurrente con la misma key ya terminó
+            # mientras esta esperaba: devolvemos su resultado tal cual,
+            # sin volver a ejecutar el pago.
+            return Response(record.response_body, status=record.response_code)
             
         receiver = serializer.validated_data["receiver_username"]
         
@@ -79,6 +90,10 @@ class CreatePaymentView(APIView):
                 idempotency_key=idempotency_key
             )
         except APIException as exc:
+            # Cualquier falla de negocio determinística (saldo insuficiente,
+            # riesgo, self-payment, wallet no encontrada, etc). Es segura de
+            # cachear: si el cliente reintenta con la misma key, va a fallar
+            # exactamente igual.
             response_body = {"error": str(exc.detail)}
             IdempotencyService.save_response(
                 record,
@@ -101,6 +116,7 @@ class CreatePaymentView(APIView):
         response_body = PaymentSerializer(payment).data
         IdempotencyService.save_response(record, response_body, status.HTTP_201_CREATED)
         return Response(response_body, status=status.HTTP_201_CREATED)
+
 
 
 

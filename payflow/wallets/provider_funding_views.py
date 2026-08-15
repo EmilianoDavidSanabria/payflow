@@ -3,7 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
-from services.idempotency_service import IdempotencyService
+from services.idempotency_service import IdempotencyService, IdempotencyKeyInProgress
 from services.risk_policy_service import RiskPolicyService
 from services.wallet_funding_service import WalletFundingService
 from services.mercadopago_service import MercadoPagoService
@@ -37,10 +37,11 @@ def _get_existing_idempotent_response(request):
 
 
 def _create_idempotency_record(request):
+    """Ver docstring equivalente en wallets/funding_views.py."""
     idempotency_key = _get_idempotency_key(request)
 
     if not idempotency_key:
-        return None
+        return None, True
 
     return IdempotencyService.create_record(
         user=request.user,
@@ -70,12 +71,20 @@ class WalletTopUpIntentView(APIView):
             return Response(body, status=status_code)
 
         try:
-            record = _create_idempotency_record(request)
+            record, is_new = _create_idempotency_record(request)
         except ValueError as exc:
             return Response(
                 {"detail": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        except IdempotencyKeyInProgress:
+            return Response(
+                {"detail": "A request with this Idempotency-Key is already being processed"},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        if record and not is_new:
+            return Response(record.response_body, status=record.response_code)
 
         RiskPolicyService.validate_top_up(
             user=request.user,
