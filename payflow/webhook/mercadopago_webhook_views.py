@@ -1,10 +1,12 @@
 import json
 import traceback
+from decimal import Decimal, InvalidOperation
 
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
+from core.exceptions import PaymentProviderMismatch
 from webhook.validators import validate_mercadopago_signature
 from services.mercadopago_service import MercadoPagoService
 from services.wallet_funding_service import WalletFundingService
@@ -17,6 +19,7 @@ from payments.events import (
     WEBHOOK_RECEIVED,
     PAYMENT_APPROVED,
     PAYMENT_FAILED,
+    PAYMENT_RECONCILIATION_DISCREPANCY,
 )
 
 from webhook.utils import (
@@ -89,6 +92,15 @@ class MercadoPagoWebhookView(APIView):
 
         return f"mp_event_fallback:{topic}:{action}:{payment_id}:{date_created}"
 
+    def _extract_provider_amount(self, payment):
+        raw_amount = payment.get("transaction_amount")
+        if raw_amount is None:
+            return None
+        try:
+            return Decimal(str(raw_amount))
+        except (InvalidOperation, TypeError, ValueError):
+            return None
+
     def post(self, request):
         try:
             body = self._get_body(request)
@@ -117,7 +129,7 @@ class MercadoPagoWebhookView(APIView):
                     {"detail": "Invalid signature"},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
-            
+
             event_id = self._extract_event_id(request, body, payment_id)
 
             print(
@@ -231,11 +243,48 @@ class MercadoPagoWebhookView(APIView):
                     flush=True,
                 )
 
-                wallet_transaction = WalletFundingService.complete_top_up(
-                    wallet_transaction_id=wallet_transaction.id,
-                    external_reference=wallet_transaction.external_reference,
-                    provider_status=provider_status,
-                )
+                provider_amount = self._extract_provider_amount(payment)
+                provider_currency = payment.get("currency_id")
+
+                try:
+                    wallet_transaction = WalletFundingService.complete_top_up(
+                        wallet_transaction_id=wallet_transaction.id,
+                        external_reference=wallet_transaction.external_reference,
+                        provider_status=provider_status,
+                        provider_payment_id=str(payment_id),
+                        provider_amount=provider_amount,
+                        provider_currency=provider_currency,
+                    )
+                except PaymentProviderMismatch as exc:
+                    print(
+                        f"[MP WEBHOOK] provider mismatch, NOT crediting | "
+                        f"tx_id={wallet_transaction.id} | error={repr(exc)}",
+                        flush=True,
+                    )
+                    PaymentEventService.log_event(
+                        action=PAYMENT_RECONCILIATION_DISCREPANCY,
+                        entity_id=wallet_transaction.id,
+                        metadata={
+                            "event_id": event_id,
+                            "payment_id": str(payment_id),
+                            "provider_status": provider_status,
+                            "external_reference": external_reference,
+                            "provider_amount": str(provider_amount) if provider_amount is not None else None,
+                            "expected_amount": str(wallet_transaction.amount),
+                            "provider_currency": provider_currency,
+                            "reason": str(exc.detail),
+                        },
+                    )
+                    # Igual marcamos el evento como procesado: el payload
+                    # de MP no va a cambiar en un retry, así que no tiene
+                    # sentido que MP siga reintentando este mismo webhook.
+                    # La transacción queda PENDING, sin acreditar, a la
+                    # espera de revisión manual / reconciliación.
+                    mark_webhook_event_processed("mercadopago", event_id)
+                    return Response(
+                        {"detail": str(exc.detail)},
+                        status=status.HTTP_409_CONFLICT,
+                    )
 
                 PaymentEventService.log_event(
                     action=PAYMENT_APPROVED,

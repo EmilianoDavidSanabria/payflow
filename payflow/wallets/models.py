@@ -90,6 +90,18 @@ class WalletTransaction(models.Model):
         blank=True,
     )
 
+    provider_payment_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text=(
+            "ID del pago en el proveedor externo (ej: payment id de "
+            "Mercado Pago) que efectivamente acreditó/completó esta "
+            "transacción. Único cuando está presente: el mismo pago del "
+            "proveedor no puede acreditar dos WalletTransaction distintas."
+        ),
+    )
+
     provider_status = models.CharField(
         max_length=50,
         default="NOT_APPLICABLE",
@@ -115,7 +127,17 @@ class WalletTransaction(models.Model):
             f"WalletTransaction {self.id} "
             f"{self.transaction_type} {self.amount} {self.status}"
         )
-    
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["provider_payment_id"],
+                name="wallet_transaction_unique_provider_payment_id",
+                condition=models.Q(provider_payment_id__isnull=False),
+            ),
+        ]
+
+
 class WalletWithdrawal(models.Model):
 
     STATUS_CHOICES = [

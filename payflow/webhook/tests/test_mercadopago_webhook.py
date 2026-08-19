@@ -314,6 +314,9 @@ def test_mercadopago_webhook_completes_top_up_when_status_is_approved(
         wallet_transaction_id=transaction.id,
         external_reference=str(transaction.id),
         provider_status="approved",
+        provider_payment_id="999008",
+        provider_amount=None,
+        provider_currency=None,
     )
     mark_processed_mock.assert_called_once_with("mercadopago", "mp_event:evt_130")
 
@@ -405,3 +408,133 @@ def test_mercadopago_webhook_extracts_payment_id_from_query_params(
     assert response.data["id"] == transaction.id
 
     mark_processed_mock.assert_called_once()
+
+
+@pytest.mark.django_db
+@patch("webhook.mercadopago_webhook_views.mark_webhook_event_processed")
+@patch("webhook.mercadopago_webhook_views.webhook_event_already_processed", return_value=False)
+@patch("webhook.mercadopago_webhook_views.MercadoPagoService")
+def test_mercadopago_webhook_does_not_credit_when_amount_mismatches(
+    mercado_pago_service_mock,
+    _already_processed_mock,
+    mark_processed_mock,
+):
+    """Fase 5: monto incorrecto -> no se acredita, queda PENDING."""
+    client = APIClient()
+    transaction = create_mercadopago_top_up_transaction(
+        amount=Decimal("100.00"),
+        status="PENDING",
+        provider_status="CHECKOUT_CREATED",
+    )
+
+    mercado_pago_service_mock.return_value.get_payment.return_value = {
+        "id": 999011,
+        "status": "approved",
+        "status_detail": "accredited",
+        "external_reference": str(transaction.id),
+        "transaction_amount": 1.00,  # distinto de los 100.00 esperados
+        "currency_id": "ARS",
+    }
+
+    response = client.post(
+        reverse("mercadopago-webhook"),
+        {"id": "evt_132", "data": {"id": "999011"}},
+        format="json",
+    )
+
+    transaction.refresh_from_db()
+
+    assert response.status_code == 409
+    assert transaction.status == "PENDING"
+    assert transaction.provider_payment_id is None
+    mark_processed_mock.assert_called_once_with("mercadopago", "mp_event:evt_132")
+
+
+@pytest.mark.django_db
+@patch("webhook.mercadopago_webhook_views.mark_webhook_event_processed")
+@patch("webhook.mercadopago_webhook_views.webhook_event_already_processed", return_value=False)
+@patch("webhook.mercadopago_webhook_views.MercadoPagoService")
+def test_mercadopago_webhook_does_not_credit_when_currency_mismatches(
+    mercado_pago_service_mock,
+    _already_processed_mock,
+    mark_processed_mock,
+):
+    """Fase 5: moneda incorrecta -> no se acredita, queda PENDING."""
+    client = APIClient()
+    transaction = create_mercadopago_top_up_transaction(
+        amount=Decimal("100.00"),
+        status="PENDING",
+        provider_status="CHECKOUT_CREATED",
+    )
+
+    mercado_pago_service_mock.return_value.get_payment.return_value = {
+        "id": 999012,
+        "status": "approved",
+        "status_detail": "accredited",
+        "external_reference": str(transaction.id),
+        "transaction_amount": 100.00,
+        "currency_id": "USD",  # la wallet de create_mercadopago_top_up_transaction es ARS
+    }
+
+    response = client.post(
+        reverse("mercadopago-webhook"),
+        {"id": "evt_133", "data": {"id": "999012"}},
+        format="json",
+    )
+
+    transaction.refresh_from_db()
+
+    assert response.status_code == 409
+    assert transaction.status == "PENDING"
+
+
+@pytest.mark.django_db
+@patch("webhook.mercadopago_webhook_views.mark_webhook_event_processed")
+@patch("webhook.mercadopago_webhook_views.webhook_event_already_processed", return_value=False)
+@patch("webhook.mercadopago_webhook_views.MercadoPagoService")
+def test_mercadopago_webhook_does_not_credit_when_payment_id_already_used_elsewhere(
+    mercado_pago_service_mock,
+    _already_processed_mock,
+    mark_processed_mock,
+):
+    """
+    Fase 5: 'payment ID ya utilizado en otra transacción'. Simula que el
+    mismo payment_id de MP ya se usó para completar OTRA WalletTransaction,
+    y verifica que un segundo webhook con ese mismo payment_id, apuntando
+    a una transacción distinta, no acredite nada.
+    """
+    client = APIClient()
+
+    already_credited = create_mercadopago_top_up_transaction(
+        amount=Decimal("30.00"),
+        status="COMPLETED",
+        provider_status="approved",
+    )
+    already_credited.provider_payment_id = "999013"
+    already_credited.save(update_fields=["provider_payment_id", "updated_at"])
+
+    other_transaction = create_mercadopago_top_up_transaction(
+        amount=Decimal("30.00"),
+        status="PENDING",
+        provider_status="CHECKOUT_CREATED",
+    )
+
+    mercado_pago_service_mock.return_value.get_payment.return_value = {
+        "id": 999013,  # mismo payment_id que already_credited
+        "status": "approved",
+        "status_detail": "accredited",
+        "external_reference": str(other_transaction.id),
+        "transaction_amount": 30.00,
+        "currency_id": "ARS",
+    }
+
+    response = client.post(
+        reverse("mercadopago-webhook"),
+        {"id": "evt_134", "data": {"id": "999013"}},
+        format="json",
+    )
+
+    other_transaction.refresh_from_db()
+
+    assert response.status_code == 409
+    assert other_transaction.status == "PENDING"

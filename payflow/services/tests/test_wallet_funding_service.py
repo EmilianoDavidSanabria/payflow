@@ -8,6 +8,7 @@ from core.exceptions import (
     InsufficientBalance,
     InvalidWalletTransactionAmount,
     InvalidWalletTransactionOperation,
+    PaymentProviderMismatch,
     WalletNotFound,
 )
 from ledger.models import LedgerEntry
@@ -457,7 +458,18 @@ def test_withdraw_completes_and_creates_ledger_and_audit(wallet_user, funded_wal
 
 
 @pytest.mark.django_db
-def test_withdraw_non_sandbox_starts_pending_provider_status_but_finishes_completed(wallet_user, funded_wallet):
+def test_withdraw_non_sandbox_stays_pending_until_provider_confirms(wallet_user, funded_wallet):
+    """
+    Antes, withdraw() marcaba status="COMPLETED" para CUALQUIER rail,
+    incluso cuando provider_status quedaba "PENDING" -- es decir,
+    mentía que un retiro real (banco/MP) ya había sido confirmado por el
+    proveedor cuando en realidad nadie afuera de PayFlow lo confirmó
+    todavía. Ahora, para rails no-SANDBOX, la transacción se crea y el
+    saldo se descuenta (ver nota en el service sobre por qué eso sigue
+    siendo así hasta que exista el modelo de hold/reservation de la
+    Fase 8), pero status queda en PENDING: solo SANDBOX resuelve al
+    instante.
+    """
     transaction = WalletFundingService.withdraw(
         user=wallet_user,
         amount=Decimal("35.00"),
@@ -468,7 +480,149 @@ def test_withdraw_non_sandbox_starts_pending_provider_status_but_finishes_comple
     funded_wallet.refresh_from_db()
     transaction.refresh_from_db()
 
-    assert transaction.status == "COMPLETED"
+    assert transaction.status == "PENDING"
     assert transaction.provider_status == "PENDING"
     assert transaction.external_reference == "bank_withdraw_ref"
+    assert transaction.completed_at is None
     assert funded_wallet.balance == Decimal("165.00")
+
+    # No debe existir un WALLET_WITHDRAWAL_COMPLETED: todavía no completó.
+    assert not AuditLog.objects.filter(
+        action="WALLET_WITHDRAWAL_COMPLETED",
+        entity_type="wallet_transaction",
+        entity_id=transaction.id,
+    ).exists()
+
+    created_log = AuditLog.objects.get(
+        action="WALLET_WITHDRAWAL_CREATED",
+        entity_type="wallet_transaction",
+        entity_id=transaction.id,
+    )
+    assert created_log.metadata["status"] == "PENDING"
+    assert created_log.metadata["provider_status"] == "PENDING"
+
+@pytest.mark.django_db
+def test_complete_top_up_rejects_mismatched_provider_amount(wallet_user, wallet):
+    """
+    Fase 5: 'monto incorrecto'. Si el proveedor confirma un pago por un
+    monto distinto al que PayFlow esperaba, NO se acredita nada.
+    """
+    intent = WalletFundingService.create_top_up_intent(
+        user=wallet_user,
+        amount=Decimal("100.00"),
+        rail="MERCADO_PAGO",
+        provider_status="PENDING",
+    )
+
+    with pytest.raises(PaymentProviderMismatch):
+        WalletFundingService.complete_top_up(
+            wallet_transaction_id=intent.id,
+            external_reference=str(intent.id),
+            provider_status="approved",
+            provider_payment_id="mp-1",
+            provider_amount=Decimal("999.00"),
+            provider_currency=None,
+        )
+
+    intent.refresh_from_db()
+    wallet.refresh_from_db()
+    assert intent.status == "PENDING"
+    assert wallet.balance == Decimal("0.00")
+
+
+@pytest.mark.django_db
+def test_complete_top_up_rejects_mismatched_provider_currency(wallet_user, wallet):
+    """Fase 5: 'moneda incorrecta'."""
+    intent = WalletFundingService.create_top_up_intent(
+        user=wallet_user,
+        amount=Decimal("100.00"),
+        rail="MERCADO_PAGO",
+        provider_status="PENDING",
+    )
+
+    with pytest.raises(PaymentProviderMismatch):
+        WalletFundingService.complete_top_up(
+            wallet_transaction_id=intent.id,
+            external_reference=str(intent.id),
+            provider_status="approved",
+            provider_payment_id="mp-2",
+            provider_amount=Decimal("100.00"),
+            provider_currency="USD",  # la wallet es ARS por default
+        )
+
+    intent.refresh_from_db()
+    wallet.refresh_from_db()
+    assert intent.status == "PENDING"
+    assert wallet.balance == Decimal("0.00")
+
+
+@pytest.mark.django_db
+def test_complete_top_up_rejects_provider_payment_id_reused_across_transactions(wallet_user, wallet):
+    """
+    Fase 5: 'payment ID ya utilizado en otra transacción'. El mismo
+    provider_payment_id no puede acreditar dos WalletTransaction
+    distintas -- ni por código (PaymentProviderMismatch antes de tocar
+    el balance) ni por la base (unique constraint condicional).
+    """
+    intent_a = WalletFundingService.create_top_up_intent(
+        user=wallet_user,
+        amount=Decimal("50.00"),
+        rail="MERCADO_PAGO",
+        provider_status="PENDING",
+    )
+    intent_b = WalletFundingService.create_top_up_intent(
+        user=wallet_user,
+        amount=Decimal("50.00"),
+        rail="MERCADO_PAGO",
+        provider_status="PENDING",
+    )
+
+    WalletFundingService.complete_top_up(
+        wallet_transaction_id=intent_a.id,
+        external_reference=str(intent_a.id),
+        provider_status="approved",
+        provider_payment_id="shared-mp-id",
+        provider_amount=Decimal("50.00"),
+        provider_currency="ARS",
+    )
+
+    with pytest.raises(PaymentProviderMismatch):
+        WalletFundingService.complete_top_up(
+            wallet_transaction_id=intent_b.id,
+            external_reference=str(intent_b.id),
+            provider_status="approved",
+            provider_payment_id="shared-mp-id",
+            provider_amount=Decimal("50.00"),
+            provider_currency="ARS",
+        )
+
+    intent_b.refresh_from_db()
+    wallet.refresh_from_db()
+    assert intent_b.status == "PENDING"
+    # Solo se acreditó intent_a (50.00), no dos veces.
+    assert wallet.balance == Decimal("50.00")
+
+
+@pytest.mark.django_db
+def test_complete_top_up_accepts_matching_provider_data_and_stores_payment_id(wallet_user, wallet):
+    intent = WalletFundingService.create_top_up_intent(
+        user=wallet_user,
+        amount=Decimal("100.00"),
+        rail="MERCADO_PAGO",
+        provider_status="PENDING",
+    )
+
+    completed = WalletFundingService.complete_top_up(
+        wallet_transaction_id=intent.id,
+        external_reference=str(intent.id),
+        provider_status="approved",
+        provider_payment_id="mp-ok-1",
+        provider_amount=Decimal("100.00"),
+        provider_currency="ARS",
+    )
+
+    assert completed.status == "COMPLETED"
+    assert completed.provider_payment_id == "mp-ok-1"
+
+    wallet.refresh_from_db()
+    assert wallet.balance == Decimal("100.00")

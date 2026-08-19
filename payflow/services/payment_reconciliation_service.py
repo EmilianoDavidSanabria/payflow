@@ -1,13 +1,24 @@
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 
 from django.utils import timezone
 
-from core.exceptions import InvalidWalletTransactionOperation
+from core.exceptions import InvalidWalletTransactionOperation, PaymentProviderMismatch
 from wallets.models import WalletTransaction
 from services.mercadopago_service import MercadoPagoService
 from services.wallet_funding_service import WalletFundingService
 from services.payment_event_service import PaymentEventService
 from payments.events import PAYMENT_RECONCILED, PAYMENT_RECONCILIATION_DISCREPANCY
+
+
+def _extract_provider_amount(payment):
+    raw_amount = payment.get("transaction_amount")
+    if raw_amount is None:
+        return None
+    try:
+        return Decimal(str(raw_amount))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
 
 
 class PaymentReconciliationService:
@@ -21,11 +32,28 @@ class PaymentReconciliationService:
         provider_payment_id = payment.get("id")
 
         if provider_status == "approved":
-            tx = WalletFundingService.complete_top_up(
-                wallet_transaction_id=tx.id,
-                external_reference=tx.external_reference,
-                provider_status=provider_status,
-            )
+            try:
+                tx = WalletFundingService.complete_top_up(
+                    wallet_transaction_id=tx.id,
+                    external_reference=tx.external_reference,
+                    provider_status=provider_status,
+                    provider_payment_id=str(provider_payment_id) if provider_payment_id else None,
+                    provider_amount=_extract_provider_amount(payment),
+                    provider_currency=payment.get("currency_id"),
+                )
+            except PaymentProviderMismatch as exc:
+                PaymentEventService.log_event(
+                    action=PAYMENT_RECONCILIATION_DISCREPANCY,
+                    entity_id=tx.id,
+                    metadata={
+                        "provider_payment_id": str(provider_payment_id) if provider_payment_id else None,
+                        "provider_status": provider_status,
+                        "external_reference": tx.external_reference,
+                        "reason": str(exc.detail),
+                        "result": "mismatch_not_credited",
+                    },
+                )
+                return tx
 
             PaymentEventService.log_event(
                 action=PAYMENT_RECONCILED,

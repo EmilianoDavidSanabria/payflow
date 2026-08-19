@@ -24,6 +24,20 @@ class InvalidWalletTransactionAmount(APIException):
     default_detail = "Wallet transaction amount must be greater than zero"
     default_code = "invalid_wallet_transaction_amount"
 
+class PaymentProviderMismatch(APIException):
+    """
+    El proveedor (ej. Mercado Pago) confirmó un pago, pero algún dato
+    del pago real (monto, moneda, o el payment_id del proveedor) no
+    coincide con lo que PayFlow esperaba para esa transacción, o ese
+    payment_id ya fue usado para acreditar otra transacción distinta.
+
+    Nunca se acredita saldo cuando se levanta esta excepción. Es un
+    caso para revisión manual / reconciliación, no un error transitorio
+    reintentable.
+    """
+    status_code = 409
+    default_detail = "Provider payment data does not match the expected wallet transaction"
+    default_code = "payment_provider_mismatch"
 
 class SelfPaymentNotAllowed(APIException):
     status_code = 400

@@ -5,6 +5,7 @@ from core.exceptions import (
     InsufficientBalance,
     InvalidWalletTransactionAmount,
     InvalidWalletTransactionOperation,
+    PaymentProviderMismatch,
     WalletNotFound,
     WalletTransactionNotPending,
 )
@@ -67,7 +68,33 @@ class WalletFundingService:
 
     @staticmethod
     @transaction.atomic
-    def complete_top_up(wallet_transaction_id, external_reference, provider_status):
+    def complete_top_up(
+        wallet_transaction_id,
+        external_reference,
+        provider_status,
+        provider_payment_id=None,
+        provider_amount=None,
+        provider_currency=None,
+    ):
+        """
+        provider_payment_id / provider_amount / provider_currency son
+        opcionales (None) para no romper callers existentes que todavía
+        no los pasan, pero cuando SÍ vienen (siempre que el caller sea
+        el webhook o la reconciliación con datos reales del proveedor)
+        se validan ANTES de mover un solo peso:
+
+          - provider_amount debe coincidir exactamente con
+            wallet_transaction.amount.
+          - provider_currency debe coincidir con wallet.currency.
+          - provider_payment_id no debe estar ya usado en OTRA
+            WalletTransaction (protege contra que un mismo pago del
+            proveedor acredite dos intents distintos).
+
+        Si algo no coincide, se levanta PaymentProviderMismatch y la
+        transacción queda tal cual estaba (PENDING) -- no se acredita
+        nada. Es responsabilidad del caller loguear la discrepancia
+        para revisión manual.
+        """
         wallet_transaction = (
             WalletTransaction.objects
             .select_for_update()
@@ -93,11 +120,41 @@ class WalletFundingService:
 
         wallet = wallet_transaction.wallet
 
+        if provider_amount is not None and provider_amount != wallet_transaction.amount:
+            raise PaymentProviderMismatch(
+                f"Provider amount {provider_amount} does not match expected "
+                f"amount {wallet_transaction.amount} for wallet_transaction "
+                f"{wallet_transaction.id}"
+            )
+
+        if provider_currency is not None and provider_currency != wallet.currency:
+            raise PaymentProviderMismatch(
+                f"Provider currency {provider_currency} does not match wallet "
+                f"currency {wallet.currency} for wallet_transaction "
+                f"{wallet_transaction.id}"
+            )
+
+        if provider_payment_id:
+            already_used = (
+                WalletTransaction.objects
+                .exclude(id=wallet_transaction.id)
+                .filter(provider_payment_id=provider_payment_id)
+                .exists()
+            )
+            if already_used:
+                raise PaymentProviderMismatch(
+                    f"Provider payment {provider_payment_id} was already used "
+                    f"to complete a different wallet transaction"
+                )
+
         wallet.balance += wallet_transaction.amount
         wallet.save(update_fields=["balance", "updated_at"])
 
         if external_reference:
             wallet_transaction.external_reference = external_reference
+
+        if provider_payment_id:
+            wallet_transaction.provider_payment_id = provider_payment_id
 
         wallet_transaction.status = "COMPLETED"
         wallet_transaction.provider_status = provider_status
@@ -107,6 +164,7 @@ class WalletFundingService:
             update_fields=[
                 "status",
                 "provider_status",
+                "provider_payment_id",
                 "failure_reason",
                 "external_reference",
                 "completed_at",
@@ -156,12 +214,7 @@ class WalletFundingService:
 
     @staticmethod
     @transaction.atomic
-    def fail_top_up(
-        wallet_transaction_id,
-        provider_status="FAILED",
-        failure_reason=None,
-        external_reference=None,
-    ):
+    def fail_top_up(wallet_transaction_id, provider_status, failure_reason, external_reference=None):
         wallet_transaction = (
             WalletTransaction.objects
             .select_for_update()
@@ -221,30 +274,14 @@ class WalletFundingService:
 
     @staticmethod
     @transaction.atomic
-    def top_up(user, amount, rail="SANDBOX", external_reference=None):
-        wallet_transaction = WalletFundingService.create_top_up_intent(
-            user=user,
-            amount=amount,
-            rail=rail,
-            external_reference=external_reference,
-            provider_status="PENDING",
-        )
-
-        return WalletFundingService.complete_top_up(
-            wallet_transaction_id=wallet_transaction.id,
-            external_reference=external_reference,
-            provider_status="COMPLETED",
-        )
-
-    @staticmethod
-    @transaction.atomic
-    def withdraw(user, amount, rail="SANDBOX", external_reference=None):
+    def withdraw(user, amount, rail="SANDBOX", external_reference=None, provider_status="PENDING"):
         if amount <= 0:
             raise InvalidWalletTransactionAmount()
 
         wallet = (
             Wallet.objects
             .select_for_update()
+            .select_related("user")
             .filter(user=user)
             .first()
         )
@@ -255,6 +292,9 @@ class WalletFundingService:
         if wallet.balance < amount:
             raise InsufficientBalance()
 
+        wallet.balance -= amount
+        wallet.save(update_fields=["balance", "updated_at"])
+
         wallet_transaction = WalletTransaction.objects.create(
             wallet=wallet,
             transaction_type="WITHDRAWAL",
@@ -262,7 +302,20 @@ class WalletFundingService:
             status="PENDING",
             rail=rail,
             external_reference=external_reference,
-            provider_status="COMPLETED" if rail == "SANDBOX" else "PENDING",
+            provider_status=provider_status,
+        )
+
+        AuditService.log_action(
+            user=user,
+            action="WALLET_UPDATED",
+            entity_type="wallet",
+            entity_id=wallet.id,
+            metadata={
+                "change": f"-{amount}",
+                "new_balance": str(wallet.balance),
+                "reason": "wallet_withdrawal_created",
+                "wallet_transaction_id": wallet_transaction.id,
+            }
         )
 
         AuditService.log_action(
@@ -276,52 +329,17 @@ class WalletFundingService:
                 "rail": rail,
                 "status": wallet_transaction.status,
                 "provider_status": wallet_transaction.provider_status,
-            }
-        )
-
-        wallet.balance -= amount
-        wallet.save(update_fields=["balance", "updated_at"])
-
-        AuditService.log_action(
-            user=user,
-            action="WALLET_UPDATED",
-            entity_type="wallet",
-            entity_id=wallet.id,
-            metadata={
-                "change": f"-{amount}",
-                "new_balance": str(wallet.balance),
-                "reason": "wallet_withdrawal",
-                "wallet_transaction_id": wallet_transaction.id,
-            }
+                "external_reference": wallet_transaction.external_reference,
+            },
         )
 
         reference = f"wallet_transaction_{wallet_transaction.id}"
 
-        LedgerService.withdrawal(
+        LedgerService.withdraw(
             user=user,
             amount=amount,
             reference=reference,
         )
         LedgerService.verify_integrity(reference)
-
-        wallet_transaction.status = "COMPLETED"
-        wallet_transaction.completed_at = timezone.now()
-        wallet_transaction.save(update_fields=["status", "completed_at", "updated_at"])
-
-        AuditService.log_action(
-            user=user,
-            action="WALLET_WITHDRAWAL_COMPLETED",
-            entity_type="wallet_transaction",
-            entity_id=wallet_transaction.id,
-            metadata={
-                "wallet_id": wallet.id,
-                "amount": str(amount),
-                "rail": rail,
-                "status": wallet_transaction.status,
-                "provider_status": wallet_transaction.provider_status,
-                "reference": reference,
-                "external_reference": wallet_transaction.external_reference,
-            }
-        )
 
         return wallet_transaction
