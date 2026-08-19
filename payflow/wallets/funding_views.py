@@ -11,6 +11,7 @@ from services.idempotency_service import IdempotencyService, IdempotencyKeyInPro
 from services.wallet_funding_service import WalletFundingService
 from services.risk_policy_service import RiskPolicyService
 from services.payment_reconciliation_service import PaymentReconciliationService
+from django.shortcuts import get_object_or_404
 from wallets.models import WalletTransaction
 from wallets.serializers import (
     WalletTopUpCreateSerializer,
@@ -254,3 +255,35 @@ class WalletTransactionListView(APIView):
             "rail": rail,
             "results": serializer.data,
         }, status=status.HTTP_200_OK)
+
+class WalletTransactionDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, transaction_id):
+        transaction = get_object_or_404(
+            WalletTransaction,
+            id=transaction_id,
+            wallet__user=request.user,
+        )
+
+        serializer = WalletTransactionDetailSerializer(transaction)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class WalletTransactionRefreshStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, transaction_id):
+        transaction = get_object_or_404(
+            WalletTransaction,
+            id=transaction_id,
+            wallet__user=request.user,
+        )
+
+        try:
+            transaction = PaymentReconciliationService.refresh_topup_status(transaction)
+        except InvalidWalletTransactionOperation as exc:
+            return error_response(str(exc.detail), status.HTTP_400_BAD_REQUEST)
+
+        serializer = WalletTransactionDetailSerializer(transaction)
+        return Response(serializer.data, status=status.HTTP_200_OK)
