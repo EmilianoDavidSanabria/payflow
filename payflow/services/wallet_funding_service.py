@@ -274,7 +274,24 @@ class WalletFundingService:
 
     @staticmethod
     @transaction.atomic
-    def withdraw(user, amount, rail="SANDBOX", external_reference=None, provider_status="PENDING"):
+    def top_up(user, amount, rail="SANDBOX", external_reference=None):
+        wallet_transaction = WalletFundingService.create_top_up_intent(
+            user=user,
+            amount=amount,
+            rail=rail,
+            external_reference=external_reference,
+            provider_status="PENDING",
+        )
+
+        return WalletFundingService.complete_top_up(
+            wallet_transaction_id=wallet_transaction.id,
+            external_reference=external_reference,
+            provider_status="COMPLETED",
+        )
+
+    @staticmethod
+    @transaction.atomic
+    def withdraw(user, amount, rail="SANDBOX", external_reference=None):
         if amount <= 0:
             raise InvalidWalletTransactionAmount()
 
@@ -302,7 +319,7 @@ class WalletFundingService:
             status="PENDING",
             rail=rail,
             external_reference=external_reference,
-            provider_status=provider_status,
+            provider_status="COMPLETED" if rail == "SANDBOX" else "PENDING",
         )
 
         AuditService.log_action(
@@ -313,7 +330,7 @@ class WalletFundingService:
             metadata={
                 "change": f"-{amount}",
                 "new_balance": str(wallet.balance),
-                "reason": "wallet_withdrawal_created",
+                "reason": "wallet_withdrawal",
                 "wallet_transaction_id": wallet_transaction.id,
             }
         )
@@ -335,11 +352,50 @@ class WalletFundingService:
 
         reference = f"wallet_transaction_{wallet_transaction.id}"
 
-        LedgerService.withdraw(
+        LedgerService.withdrawal(
             user=user,
             amount=amount,
             reference=reference,
         )
         LedgerService.verify_integrity(reference)
+
+        # SANDBOX es un rail sintético que resuelve al instante: no hay
+        # ningún proveedor real que tenga que confirmar nada, así que acá
+        # es correcto cerrar la transacción como COMPLETED de una.
+        #
+        # Para cualquier otro rail (BANK_TRANSFER, CARD, MERCADO_PAGO) el
+        # dinero ya salió de la wallet (ver arriba), pero el proveedor
+        # todavía no confirmó el retiro -- forzar status="COMPLETED" acá
+        # sería falso: la transacción quedaría marcada como terminada
+        # exitosamente sin que nadie afuera de PayFlow lo haya confirmado.
+        # Si el proveedor rechaza el retiro después, hoy no hay mecanismo
+        # de reversión -- eso es exactamente lo que se va a resolver con
+        # el modelo de hold/reservation de la Fase 8
+        # (withdrawal-state-machine). Este fix puntual solo evita que el
+        # sistema mienta sobre el estado; no resuelve todavía "qué pasa
+        # si el retiro falla después de haber restado el saldo" para
+        # rails reales -- eso queda para esa etapa, a propósito, para no
+        # rediseñar el modelo de datos en un commit que se supone que
+        # solo corrige un bug puntual.
+        if rail == "SANDBOX":
+            wallet_transaction.status = "COMPLETED"
+            wallet_transaction.completed_at = timezone.now()
+            wallet_transaction.save(update_fields=["status", "completed_at", "updated_at"])
+
+            AuditService.log_action(
+                user=user,
+                action="WALLET_WITHDRAWAL_COMPLETED",
+                entity_type="wallet_transaction",
+                entity_id=wallet_transaction.id,
+                metadata={
+                    "wallet_id": wallet.id,
+                    "amount": str(amount),
+                    "rail": rail,
+                    "status": wallet_transaction.status,
+                    "provider_status": wallet_transaction.provider_status,
+                    "reference": reference,
+                    "external_reference": wallet_transaction.external_reference,
+                }
+            )
 
         return wallet_transaction
