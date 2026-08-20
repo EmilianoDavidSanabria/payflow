@@ -18,21 +18,15 @@ class LedgerService:
         amount,
         reference,
     ):
-        """
-        Creates the complete double-entry ledger record atomically.
-
-        The database enforces:
-        - debit and credit cannot be negative
-        - exactly one side must be positive per entry
-        - only one debit entry per reference
-        - only one credit entry per reference
-        """
-
         if amount <= Decimal("0.00"):
-            raise ValueError("Ledger amount must be greater than zero")
+            raise ValueError(
+                "Ledger amount must be greater than zero"
+            )
 
         if not reference:
-            raise ValueError("Ledger reference is required")
+            raise ValueError(
+                "Ledger reference is required"
+            )
 
         entries = [
             LedgerEntry(
@@ -90,9 +84,19 @@ class LedgerService:
 
     @staticmethod
     def verify_integrity(reference):
-        totals = LedgerEntry.objects.filter(
+        entries = LedgerEntry.objects.filter(
             reference=reference
-        ).aggregate(
+        )
+
+        entry_count = entries.count()
+
+        if entry_count != 2:
+            raise ValueError(
+                f"Ledger reference {reference} must contain "
+                f"exactly two entries"
+            )
+
+        totals = entries.aggregate(
             total_debit=Sum("debit"),
             total_credit=Sum("credit"),
         )

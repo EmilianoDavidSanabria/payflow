@@ -13,8 +13,8 @@ class Migration(migrations.Migration):
             model_name="ledgerentry",
             name="reference",
             field=models.CharField(
-                db_index=True,
                 max_length=255,
+                db_index=True,
             ),
         ),
 

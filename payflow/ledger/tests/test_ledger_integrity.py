@@ -1,9 +1,8 @@
 from decimal import Decimal
 
 import pytest
-from django.db import IntegrityError
-
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 
 from ledger.models import LedgerEntry
 from services.ledger_service import LedgerService
@@ -106,7 +105,7 @@ def test_reference_can_have_only_one_credit():
         account_type="SYSTEM",
         debit=Decimal("100.00"),
         credit=Decimal("0.00"),
-        reference="duplicate_credit_reference",
+        reference=reference,
     )
 
     LedgerEntry.objects.create(
@@ -126,7 +125,7 @@ def test_reference_can_have_only_one_credit():
 
 
 @pytest.mark.django_db
-def test_verify_integrity_detects_balanced_ledger():
+def test_verify_integrity_accepts_valid_balanced_ledger():
     reference = "balanced_ledger"
 
     LedgerEntry.objects.create(
@@ -144,3 +143,33 @@ def test_verify_integrity_detects_balanced_ledger():
     )
 
     assert LedgerService.verify_integrity(reference) is True
+
+
+@pytest.mark.django_db
+def test_verify_integrity_rejects_missing_reference():
+    with pytest.raises(ValueError):
+        LedgerService.verify_integrity(
+            "reference_that_does_not_exist"
+        )
+
+
+@pytest.mark.django_db
+def test_verify_integrity_rejects_unbalanced_ledger():
+    reference = "unbalanced_ledger"
+
+    LedgerEntry.objects.create(
+        account_type="SYSTEM",
+        debit=Decimal("100.00"),
+        credit=Decimal("0.00"),
+        reference=reference,
+    )
+
+    LedgerEntry.objects.create(
+        account_type="SYSTEM",
+        debit=Decimal("0.00"),
+        credit=Decimal("50.00"),
+        reference=reference,
+    )
+
+    with pytest.raises(ValueError):
+        LedgerService.verify_integrity(reference)
